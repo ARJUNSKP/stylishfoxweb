@@ -241,7 +241,7 @@ export default function CartDrawer() {
                 className="w-full py-4 bg-[#25D366] hover:bg-[#1ebd59] text-black font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg hover:shadow-green-500/20 active:scale-[0.99] rounded text-center"
               >
                 <MessageCircle className="w-4 h-4 fill-black" />
-                <span>Checkout via WhatsApp • ₹ {grandTotal.toLocaleString()}</span>
+                <span>Checkout WhatsApp • ₹ {grandTotal.toLocaleString()}</span>
               </a>
 
               <div className="flex items-center justify-center gap-2 text-[11px] text-zinc-500 pt-1">

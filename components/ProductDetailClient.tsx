@@ -415,7 +415,7 @@ export default function ProductDetailClient({ product }: Props) {
               className="w-full py-3.5 bg-zinc-900 hover:bg-[#25D366] hover:text-black text-white font-black text-xs uppercase tracking-widest border border-zinc-700 hover:border-[#25D366] transition-all flex items-center justify-center gap-2 cursor-pointer rounded shadow-md group"
             >
               <MessageCircle className="w-4 h-4 text-[#25D366] group-hover:text-black group-hover:fill-black transition-colors" />
-              <span>Instant Buy via WhatsApp</span>
+              <span>Instant Buy WhatsApp</span>
             </a>
           </div>
 
