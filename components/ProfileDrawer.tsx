@@ -208,7 +208,7 @@ export default function ProfileDrawer() {
                           whatsappNumber: prev.sameAsContact ? val : prev.whatsappNumber,
                         }));
                       }}
-                      placeholder="+91 98765 43210"
+                      placeholder="+91 80863 88058"
                       required
                       className="w-full bg-zinc-900 border border-zinc-700 rounded-lg pl-9 pr-3 py-2 text-xs text-white focus:outline-none focus:border-[#fef08a] transition-colors"
                     />
@@ -246,7 +246,7 @@ export default function ProfileDrawer() {
                       onChange={(e) =>
                         setFormData({ ...formData, whatsappNumber: e.target.value })
                       }
-                      placeholder="+91 98765 43210"
+                      placeholder="+91 80863 88058"
                       className="w-full bg-zinc-900 border border-zinc-700 disabled:opacity-60 rounded-lg pl-9 pr-3 py-2 text-xs text-white focus:outline-none focus:border-[#fef08a] transition-colors"
                     />
                   </div>

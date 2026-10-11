@@ -34,7 +34,7 @@ export interface WhatsAppCheckoutParams {
   whatsappNumber?: string;
 }
 
-export const DEFAULT_STORE_WHATSAPP = '919876543210';
+export const DEFAULT_STORE_WHATSAPP = '918086388058';
 
 export function createWhatsAppOrderUrl({
   items,
