@@ -44,9 +44,7 @@ export default function ProductDetailClient({
   });
 
   useEffect(() => {
-    if (initialRelatedProducts && initialRelatedProducts.length > 0) {
-      setRelatedProducts(initialRelatedProducts);
-    } else {
+    if (!initialRelatedProducts || initialRelatedProducts.length === 0) {
       fetchRelatedProducts(product.id, 4).then((data) => {
         if (data && data.length > 0) {
           setRelatedProducts(data);
