@@ -190,3 +190,33 @@ export async function fetchProductById(idOrSlug: string | number): Promise<Produ
 
   return bySlugOrName || null;
 }
+
+/**
+ * Fetch related products for a product from Backend API with fallback
+ */
+export async function fetchRelatedProducts(
+  idOrSlug: string | number,
+  limit: number = 4
+): Promise<Product[]> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/products/${idOrSlug}/related?limit=${limit}`, {
+      next: { revalidate: 30 },
+    });
+
+    if (res.ok) {
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+        return json.data.map((item: any, idx: number) =>
+          transformBackendProduct(item, idx)
+        );
+      }
+    }
+  } catch (err) {
+    console.warn(`[StyleFoxweb] Error fetching related products for ${idOrSlug}:`, err);
+  }
+
+  // Fallback to static products excluding current product
+  return productsData
+    .filter((p) => String(p.id) !== String(idOrSlug))
+    .slice(0, limit);
+}

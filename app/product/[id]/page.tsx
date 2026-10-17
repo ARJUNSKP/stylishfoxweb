@@ -1,6 +1,6 @@
 import React from 'react';
 import { notFound } from 'next/navigation';
-import { fetchProductById, fetchProducts } from '@/utils/api';
+import { fetchProductById, fetchProducts, fetchRelatedProducts } from '@/utils/api';
 import ProductDetailClient from '@/components/ProductDetailClient';
 import TopBanner from '@/components/TopBanner';
 import Header from '@/components/Header';
@@ -43,12 +43,14 @@ export default async function ProductDetailPage({ params }: Props) {
     notFound();
   }
 
+  const relatedProducts = await fetchRelatedProducts(id, 4);
+
   return (
     <div className="min-h-screen flex flex-col bg-black text-white">
       <TopBanner />
       <Header />
       <main className="flex-1">
-        <ProductDetailClient product={product} />
+        <ProductDetailClient product={product} initialRelatedProducts={relatedProducts} />
       </main>
       <Footer />
       <FloatingIcons />

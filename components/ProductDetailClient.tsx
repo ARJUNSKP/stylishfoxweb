@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
@@ -19,15 +19,41 @@ import { Product, getAllProducts } from '@/data/products';
 import { useCart } from '@/context/CartContext';
 import { useProfile } from '@/context/ProfileContext';
 import { createWhatsAppOrderUrl } from '@/utils/whatsapp';
+import { fetchRelatedProducts } from '@/utils/api';
 
 interface Props {
   product: Product;
+  initialRelatedProducts?: Product[];
 }
 
-export default function ProductDetailClient({ product }: Props) {
+export default function ProductDetailClient({
+  product,
+  initialRelatedProducts,
+}: Props) {
   const { addToCart } = useCart();
   const { profile, addresses, selectedAddressId } = useProfile();
   const allProducts = getAllProducts();
+
+  const [relatedProducts, setRelatedProducts] = useState<Product[]>(() => {
+    if (initialRelatedProducts && initialRelatedProducts.length > 0) {
+      return initialRelatedProducts;
+    }
+    return allProducts
+      .filter((p) => String(p.id) !== String(product.id))
+      .slice(0, 4);
+  });
+
+  useEffect(() => {
+    if (initialRelatedProducts && initialRelatedProducts.length > 0) {
+      setRelatedProducts(initialRelatedProducts);
+    } else {
+      fetchRelatedProducts(product.id, 4).then((data) => {
+        if (data && data.length > 0) {
+          setRelatedProducts(data);
+        }
+      });
+    }
+  }, [product.id, initialRelatedProducts]);
 
   const fallbackImages =
     product.images && product.images.length > 0
@@ -138,10 +164,6 @@ export default function ProductDetailClient({ product }: Props) {
         }
       : undefined,
   });
-
-  const relatedProducts = allProducts
-    .filter((p) => String(p.id) !== String(product.id))
-    .slice(0, 4);
 
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 md:py-10">
@@ -515,35 +537,44 @@ export default function ProductDetailClient({ product }: Props) {
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-4 md:gap-6">
-          {relatedProducts.map((relProduct) => (
-            <Link
-              key={relProduct.id}
-              href={`/product/${relProduct.id}`}
-              className="group flex flex-col"
-            >
-              <div className="relative aspect-[3/4] bg-zinc-900 overflow-hidden mb-3">
-                <Image
-                  src={relProduct.colors[0].images[0]}
-                  alt={relProduct.name}
-                  fill
-                  sizes="(max-width: 768px) 50vw, 25vw"
-                  className="object-cover object-center group-hover:scale-105 transition-transform duration-500"
-                />
-                <div className="absolute bottom-0 left-0 h-1 w-1/3 bg-[#fef08a] group-hover:w-full transition-all duration-500" />
-              </div>
-              <h4 className="text-xs font-bold uppercase text-white line-clamp-1 group-hover:text-[#fef08a] transition-colors">
-                {relProduct.name}
-              </h4>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-xs font-bold text-white">
-                  ₹ {relProduct.price.toLocaleString()}
-                </span>
-                <span className="text-[11px] text-zinc-500 line-through">
-                  ₹ {relProduct.originalPrice.toLocaleString()}
-                </span>
-              </div>
-            </Link>
-          ))}
+          {relatedProducts.map((relProduct, idx) => {
+            const relImage =
+              relProduct.colors?.[0]?.images?.[0] ||
+              relProduct.images?.[0] ||
+              'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80';
+
+            return (
+              <Link
+                key={`${relProduct.id}-${idx}`}
+                href={`/product/${relProduct.id}`}
+                className="group flex flex-col"
+              >
+                <div className="relative aspect-[3/4] bg-zinc-900 overflow-hidden mb-3">
+                  <Image
+                    src={relImage}
+                    alt={relProduct.name}
+                    fill
+                    sizes="(max-width: 768px) 50vw, 25vw"
+                    className="object-cover object-center group-hover:scale-105 transition-transform duration-500"
+                  />
+                  <div className="absolute bottom-0 left-0 h-1 w-1/3 bg-[#fef08a] group-hover:w-full transition-all duration-500" />
+                </div>
+                <h4 className="text-xs font-bold uppercase text-white line-clamp-1 group-hover:text-[#fef08a] transition-colors">
+                  {relProduct.name}
+                </h4>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-xs font-bold text-white">
+                    ₹ {relProduct.price ? relProduct.price.toLocaleString() : '0'}
+                  </span>
+                  {relProduct.originalPrice ? (
+                    <span className="text-[11px] text-zinc-500 line-through">
+                      ₹ {relProduct.originalPrice.toLocaleString()}
+                    </span>
+                  ) : null}
+                </div>
+              </Link>
+            );
+          })}
         </div>
       </div>
     </div>
