@@ -176,7 +176,12 @@ export async function fetchProductById(idOrSlug: string | number): Promise<Produ
   }
 
   // Fallback to static mock data
-  const numericId = typeof idOrSlug === 'number' ? idOrSlug : parseInt(idOrSlug, 10);
+  const exactMatch = productsData.find(
+    (p) => String(p.id) === String(idOrSlug) || (p.slug && p.slug === String(idOrSlug))
+  );
+  if (exactMatch) return exactMatch;
+
+  const numericId = typeof idOrSlug === 'number' ? idOrSlug : (/^\d+$/.test(String(idOrSlug)) ? parseInt(idOrSlug, 10) : NaN);
   if (!isNaN(numericId)) {
     const found = productsData.find((p) => p.id === numericId);
     if (found) return found;

@@ -15,8 +15,8 @@ type PageParams = {
 };
 
 type Props = {
-  params: Promise<PageParams> | PageParams;
-  searchParams?: Promise<{ [key: string]: string | string[] | undefined }> | { [key: string]: string | string[] | undefined };
+  params: Promise<PageParams>;
+  searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
 };
 
 export async function generateStaticParams() {
@@ -32,8 +32,7 @@ export async function generateStaticParams() {
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const resolvedParams = await Promise.resolve(params);
-  const id = resolvedParams?.id ? decodeURIComponent(resolvedParams.id) : '';
+  const { id } = await params;
   const product = await fetchProductById(id);
 
   if (!product) {
@@ -49,8 +48,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function ProductDetailPage({ params }: Props) {
-  const resolvedParams = await Promise.resolve(params);
-  const id = resolvedParams?.id ? decodeURIComponent(resolvedParams.id) : '';
+  const { id } = await params;
   const product = await fetchProductById(id);
 
   if (!product) {
