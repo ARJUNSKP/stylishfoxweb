@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 
 export interface CartItem {
   id: string; // unique composite key: `${productId}-${color}-${size}`
@@ -31,23 +31,27 @@ interface CartContextType {
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
-  const [items, setItems] = useState<CartItem[]>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('stylefox_cart');
-        if (saved) {
-          return JSON.parse(saved);
-        }
-      } catch {
-        // ignore
-      }
-    }
-    return [];
-  });
+  const [items, setItems] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const isHydrated = useRef(false);
 
-  // Save to local storage on update
+  // Hydrate cart from localStorage on mount (client-only)
   useEffect(() => {
+    try {
+      const saved = localStorage.getItem('stylefox_cart');
+      if (saved) {
+        setItems(JSON.parse(saved));
+      }
+    } catch {
+      // ignore
+    } finally {
+      isHydrated.current = true;
+    }
+  }, []);
+
+  // Save to local storage on update after initial hydration
+  useEffect(() => {
+    if (!isHydrated.current) return;
     try {
       localStorage.setItem('stylefox_cart', JSON.stringify(items));
     } catch {

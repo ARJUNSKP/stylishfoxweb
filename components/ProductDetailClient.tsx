@@ -126,42 +126,48 @@ export default function ProductDetailClient({
     setTimeout(() => setIsAdded(false), 2000);
   };
 
-  const selectedAddress = addresses.find((a) => a.id === selectedAddressId) || addresses[0];
-  const instantShipping = itemTotalAmount > 1999 ? 0 : 149;
-  const instantFinalAmount = itemTotalAmount + instantShipping;
+  const handleInstantWhatsAppBuy = () => {
+    const selectedAddress = addresses.find((a) => a.id === selectedAddressId) || addresses[0];
+    const instantShipping = itemTotalAmount > 1999 ? 0 : 149;
+    const instantFinalAmount = itemTotalAmount + instantShipping;
 
-  const whatsappInstantUrl = createWhatsAppOrderUrl({
-    items: [
-      {
-        name: product.name,
-        color: activeColor.name,
-        size: selectedSize,
-        quantity,
-        price: product.price,
+    const url = createWhatsAppOrderUrl({
+      items: [
+        {
+          name: product.name,
+          color: activeColor.name,
+          size: selectedSize,
+          quantity,
+          price: product.price,
+        },
+      ],
+      subtotal: itemTotalAmount,
+      discount: 0,
+      shipping: instantShipping,
+      grandTotal: instantFinalAmount,
+      customer: {
+        firstName: profile.firstName,
+        lastName: profile.lastName,
+        contactNumber: profile.contactNumber,
+        email: profile.email,
       },
-    ],
-    subtotal: itemTotalAmount,
-    discount: 0,
-    shipping: instantShipping,
-    grandTotal: instantFinalAmount,
-    customer: {
-      firstName: profile.firstName,
-      lastName: profile.lastName,
-      contactNumber: profile.contactNumber,
-      email: profile.email,
-    },
-    address: selectedAddress
-      ? {
-          name: selectedAddress.name,
-          phone: selectedAddress.phone,
-          street: selectedAddress.street,
-          city: selectedAddress.city,
-          state: selectedAddress.state,
-          pincode: selectedAddress.pincode,
-          tag: selectedAddress.tag,
-        }
-      : undefined,
-  });
+      address: selectedAddress
+        ? {
+            name: selectedAddress.name,
+            phone: selectedAddress.phone,
+            street: selectedAddress.street,
+            city: selectedAddress.city,
+            state: selectedAddress.state,
+            pincode: selectedAddress.pincode,
+            tag: selectedAddress.tag,
+          }
+        : undefined,
+    });
+
+    if (typeof window !== 'undefined') {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  };
 
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 md:py-10">
@@ -453,15 +459,14 @@ export default function ProductDetailClient({
               )}
             </button>
 
-            <a
-              href={whatsappInstantUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              type="button"
+              onClick={handleInstantWhatsAppBuy}
               className="w-full py-3.5 bg-zinc-900 hover:bg-[#25D366] hover:text-black text-white font-black text-xs uppercase tracking-widest border border-zinc-700 hover:border-[#25D366] transition-all flex items-center justify-center gap-2 cursor-pointer rounded shadow-md group"
             >
               <MessageCircle className="w-4 h-4 text-[#25D366] group-hover:text-black group-hover:fill-black transition-colors" />
               <span>Instant Buy WhatsApp</span>
-            </a>
+            </button>
           </div>
 
           {/* Trust badges */}

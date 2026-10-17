@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 
 export interface Address {
   id: string;
@@ -92,98 +92,90 @@ const ProfileContext = createContext<ProfileContextType | undefined>(undefined);
 
 export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const isHydrated = useRef(false);
 
   // Profile data
-  const [profile, setProfile] = useState<UserProfile>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('stylefox_profile');
-        if (saved) return JSON.parse(saved);
-      } catch {
-        // ignore
-      }
-    }
-    return defaultProfile;
-  });
+  const [profile, setProfile] = useState<UserProfile>(defaultProfile);
 
   // Billing / Main Addresses
-  const [addresses, setAddresses] = useState<Address[]>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('stylefox_addresses');
-        if (saved) return JSON.parse(saved);
-      } catch {
-        // ignore
-      }
-    }
-    return defaultAddresses;
-  });
-
-  const [selectedAddressId, setSelectedAddressId] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('stylefox_selected_address');
-        if (saved) return saved;
-      } catch {
-        // ignore
-      }
-    }
-    return defaultAddresses[0]?.id || '';
-  });
+  const [addresses, setAddresses] = useState<Address[]>(defaultAddresses);
+  const [selectedAddressId, setSelectedAddressId] = useState<string>(
+    defaultAddresses[0]?.id || ''
+  );
 
   // Shipping Addresses
-  const [shippingAddresses, setShippingAddresses] = useState<Address[]>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('stylefox_shipping_addresses');
-        if (saved) return JSON.parse(saved);
-      } catch {
-        // ignore
-      }
-    }
-    return defaultShippingAddresses;
-  });
+  const [shippingAddresses, setShippingAddresses] = useState<Address[]>(
+    defaultShippingAddresses
+  );
+  const [selectedShippingAddressId, setSelectedShippingAddressId] = useState<string>(
+    defaultShippingAddresses[0]?.id || ''
+  );
 
-  const [selectedShippingAddressId, setSelectedShippingAddressId] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('stylefox_selected_shipping_address');
-        if (saved) return saved;
-      } catch {
-        // ignore
-      }
-    }
-    return defaultShippingAddresses[0]?.id || '';
-  });
-
-  // Persistence effects
+  // Hydrate from localStorage once on client mount to eliminate SSR hydration mismatch
   useEffect(() => {
+    try {
+      const savedProfile = localStorage.getItem('stylefox_profile');
+      if (savedProfile) setProfile(JSON.parse(savedProfile));
+
+      const savedAddresses = localStorage.getItem('stylefox_addresses');
+      if (savedAddresses) setAddresses(JSON.parse(savedAddresses));
+
+      const savedSelectedAddress = localStorage.getItem('stylefox_selected_address');
+      if (savedSelectedAddress) setSelectedAddressId(savedSelectedAddress);
+
+      const savedShipping = localStorage.getItem('stylefox_shipping_addresses');
+      if (savedShipping) setShippingAddresses(JSON.parse(savedShipping));
+
+      const savedSelectedShipping = localStorage.getItem(
+        'stylefox_selected_shipping_address'
+      );
+      if (savedSelectedShipping) setSelectedShippingAddressId(savedSelectedShipping);
+    } catch {
+      // ignore
+    } finally {
+      isHydrated.current = true;
+    }
+  }, []);
+
+  // Persistence effects - only save after initial hydration
+  useEffect(() => {
+    if (!isHydrated.current) return;
     try {
       localStorage.setItem('stylefox_profile', JSON.stringify(profile));
     } catch {}
   }, [profile]);
 
   useEffect(() => {
+    if (!isHydrated.current) return;
     try {
       localStorage.setItem('stylefox_addresses', JSON.stringify(addresses));
     } catch {}
   }, [addresses]);
 
   useEffect(() => {
+    if (!isHydrated.current) return;
     try {
       localStorage.setItem('stylefox_selected_address', selectedAddressId);
     } catch {}
   }, [selectedAddressId]);
 
   useEffect(() => {
+    if (!isHydrated.current) return;
     try {
-      localStorage.setItem('stylefox_shipping_addresses', JSON.stringify(shippingAddresses));
+      localStorage.setItem(
+        'stylefox_shipping_addresses',
+        JSON.stringify(shippingAddresses)
+      );
     } catch {}
   }, [shippingAddresses]);
 
   useEffect(() => {
+    if (!isHydrated.current) return;
     try {
-      localStorage.setItem('stylefox_selected_shipping_address', selectedShippingAddressId);
+      localStorage.setItem(
+        'stylefox_selected_shipping_address',
+        selectedShippingAddressId
+      );
     } catch {}
   }, [selectedShippingAddressId]);
 
