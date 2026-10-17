@@ -29,15 +29,40 @@ export default function ProductDetailClient({ product }: Props) {
   const { profile, addresses, selectedAddressId } = useProfile();
   const allProducts = getAllProducts();
 
+  const fallbackImages =
+    product.images && product.images.length > 0
+      ? product.images
+      : ['https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80'];
+
+  const fallbackColor = {
+    name: 'Standard Edition',
+    hex: '#0d0d0d',
+    images: fallbackImages,
+  };
+
   // State for selected color variation
   const [selectedColorIndex, setSelectedColorIndex] = useState(0);
-  const activeColor = product.colors[selectedColorIndex] || product.colors[0];
+  const activeColor =
+    product.colors && product.colors.length > 0
+      ? product.colors[selectedColorIndex] || product.colors[0]
+      : fallbackColor;
+
+  const activeImages =
+    activeColor.images && activeColor.images.length > 0
+      ? activeColor.images
+      : fallbackImages;
 
   // State for active image index in current color's gallery
   const [activeImageIndex, setActiveImageIndex] = useState(0);
 
   // State for size selection
-  const [selectedSize, setSelectedSize] = useState<string>(product.sizes[1] || product.sizes[0]);
+  const availableSizes =
+    product.sizes && product.sizes.length > 0
+      ? product.sizes
+      : ['S', 'M', 'L', 'XL'];
+  const [selectedSize, setSelectedSize] = useState<string>(
+    availableSizes[1] || availableSizes[0] || 'M'
+  );
 
   // State for quantity
   const [quantity, setQuantity] = useState<number>(1);
@@ -68,7 +93,7 @@ export default function ProductDetailClient({ product }: Props) {
       productId: product.id,
       name: product.name,
       price: product.price,
-      image: activeColor.images[activeImageIndex] || activeColor.images[0],
+      image: activeImages[activeImageIndex] || activeImages[0],
       color: activeColor.name,
       size: selectedSize,
       quantity,
@@ -115,7 +140,7 @@ export default function ProductDetailClient({ product }: Props) {
   });
 
   const relatedProducts = allProducts
-    .filter((p) => p.id !== product.id)
+    .filter((p) => String(p.id) !== String(product.id))
     .slice(0, 4);
 
   return (
@@ -141,7 +166,7 @@ export default function ProductDetailClient({ product }: Props) {
         <div className="lg:col-span-7 flex flex-col-reverse md:flex-row gap-3 sm:gap-4">
           {/* Vertical Thumbnails on tablet/desktop, horizontal touch-swipe on mobile */}
           <div className="flex md:flex-col gap-2.5 sm:gap-3 overflow-x-auto md:overflow-y-auto no-scrollbar md:w-20 lg:w-24 shrink-0 pb-1 md:pb-0">
-            {activeColor.images.map((imgUrl, idx) => {
+            {activeImages.map((imgUrl, idx) => {
               const isSelected = idx === activeImageIndex;
               return (
                 <button
@@ -199,7 +224,7 @@ export default function ProductDetailClient({ product }: Props) {
             </div>
 
             <Image
-              src={activeColor.images[activeImageIndex] || activeColor.images[0]}
+              src={activeImages[activeImageIndex] || activeImages[0]}
               alt={`${product.name} - ${activeColor.name}`}
               fill
               priority
@@ -210,7 +235,7 @@ export default function ProductDetailClient({ product }: Props) {
             {/* Bottom Color & View Tag */}
             <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between pointer-events-none">
               <span className="bg-black/70 backdrop-blur-md text-[11px] font-semibold text-zinc-300 px-3 py-1 rounded border border-zinc-800">
-                {activeColor.name} • View {activeImageIndex + 1} of {activeColor.images.length}
+                {activeColor.name} • View {activeImageIndex + 1} of {activeImages.length}
               </span>
               <span className="bg-emerald-950/80 backdrop-blur-md text-[11px] font-bold text-emerald-400 px-3 py-1 rounded border border-emerald-800/40">
                 In Stock

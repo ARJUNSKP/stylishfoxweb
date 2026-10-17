@@ -6,8 +6,11 @@ import ProductGrid from "@/components/ProductGrid";
 import FloatingIcons from "@/components/FloatingIcons";
 import Loader from "@/components/Loader";
 import Footer from "@/components/Footer";
+import { fetchProducts } from "@/utils/api";
 
-export default function Home() {
+export default async function Home() {
+  const products = await fetchProducts();
+
   return (
     <div className="min-h-screen flex flex-col bg-black text-white">
       <Loader />
@@ -16,7 +19,7 @@ export default function Home() {
       <Hero />
       {/* <CategoryNav /> */}
       <FilterBar />
-      <ProductGrid />
+      <ProductGrid initialProducts={products} />
       <Footer />
       <FloatingIcons />
     </div>

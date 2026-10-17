@@ -1,18 +1,19 @@
 import React from 'react';
 import { notFound } from 'next/navigation';
-import { getProductById, getAllProducts } from '@/data/products';
+import { fetchProductById, fetchProducts } from '@/utils/api';
 import ProductDetailClient from '@/components/ProductDetailClient';
 import TopBanner from '@/components/TopBanner';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import FloatingIcons from '@/components/FloatingIcons';
 
+
 type Props = {
   params: Promise<{ id: string }>;
 };
 
 export async function generateStaticParams() {
-  const products = getAllProducts();
+  const products = await fetchProducts();
   return products.map((p) => ({
     id: p.id.toString(),
   }));
@@ -20,8 +21,7 @@ export async function generateStaticParams() {
 
 export async function generateMetadata({ params }: Props) {
   const { id } = await params;
-  const productId = parseInt(id, 10);
-  const product = getProductById(productId);
+  const product = await fetchProductById(id);
 
   if (!product) {
     return {
@@ -37,8 +37,7 @@ export async function generateMetadata({ params }: Props) {
 
 export default async function ProductDetailPage({ params }: Props) {
   const { id } = await params;
-  const productId = parseInt(id, 10);
-  const product = getProductById(productId);
+  const product = await fetchProductById(id);
 
   if (!product) {
     notFound();

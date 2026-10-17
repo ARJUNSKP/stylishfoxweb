@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 
 export interface CartItem {
   id: string; // unique composite key: `${productId}-${color}-${size}`
-  productId: number;
+  productId: number | string;
   name: string;
   price: number;
   image: string;

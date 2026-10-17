@@ -5,7 +5,8 @@ export interface ProductColor {
 }
 
 export interface Product {
-  id: number;
+  id: number | string;
+  slug?: string;
   name: string;
   tagline: string;
   price: number;
@@ -17,6 +18,9 @@ export interface Product {
   features: string[];
   colors: ProductColor[];
   sizes: string[];
+  images?: string[];
+  variants?: any[];
+  categoryId?: string | null;
 }
 
 export const productsData: Product[] = [
@@ -219,7 +223,11 @@ export const getAllProducts = (): (Product & { gridId: number })[] => {
   });
 };
 
-export const getProductById = (id: number): (Product & { gridId: number }) | null => {
+export const getProductById = (id: number | string): (Product & { gridId?: number }) | null => {
   const all = getAllProducts();
-  return all.find((p) => p.id === id) || null;
+  return (
+    all.find((p) => String(p.id) === String(id) || (p.slug && p.slug === String(id))) ||
+    productsData.find((p) => String(p.id) === String(id)) ||
+    null
+  );
 };

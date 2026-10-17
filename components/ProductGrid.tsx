@@ -1,26 +1,50 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { ShoppingBag, Eye } from 'lucide-react';
-import { getAllProducts } from '@/data/products';
+import { Product, getAllProducts } from '@/data/products';
 import { useCart } from '@/context/CartContext';
+import { fetchProducts } from '@/utils/api';
 
-export default function ProductGrid() {
-  const products = getAllProducts();
+interface ProductGridProps {
+  initialProducts?: Product[];
+}
+
+export default function ProductGrid({ initialProducts }: ProductGridProps) {
+  const [products, setProducts] = useState<Product[]>(() =>
+    initialProducts && initialProducts.length > 0 ? initialProducts : getAllProducts()
+  );
   const { addToCart } = useCart();
 
-  const handleQuickAdd = (e: React.MouseEvent, product: (typeof products)[0]) => {
+  useEffect(() => {
+    // Refresh or fetch products from backend API
+    fetchProducts().then((data) => {
+      if (data && data.length > 0) {
+        setProducts(data);
+      }
+    });
+  }, []);
+
+  const handleQuickAdd = (e: React.MouseEvent, product: Product) => {
     e.preventDefault();
     e.stopPropagation();
-    const defaultColor = product.colors[0];
-    const defaultSize = product.sizes[0] || 'M';
+    const defaultColor =
+      product.colors && product.colors.length > 0
+        ? product.colors[0]
+        : { name: 'Standard', hex: '#0d0d0d', images: product.images || [] };
+    const defaultImage =
+      defaultColor.images?.[0] ||
+      product.images?.[0] ||
+      'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80';
+    const defaultSize = product.sizes?.[0] || 'M';
+
     addToCart({
       productId: product.id,
       name: product.name,
       price: product.price,
-      image: defaultColor.images[0],
+      image: defaultImage,
       color: defaultColor.name,
       size: defaultSize,
       quantity: 1,
@@ -32,11 +56,17 @@ export default function ProductGrid() {
       {products.map((product, index) => {
         // Make every 5th item featured
         const isFeatured = (index + 1) % 5 === 0;
+        const mainImage =
+          product.colors?.[0]?.images?.[0] ||
+          product.images?.[0] ||
+          'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80';
+
+        const productHref = `/product/${product.id}`;
 
         return (
           <Link
             key={`${product.id}-${index}`}
-            href={`/product/${product.id}`}
+            href={productHref}
             className={`flex flex-col group cursor-pointer ${
               isFeatured ? 'col-span-2 lg:col-span-1' : 'col-span-1'
             }`}
@@ -53,7 +83,7 @@ export default function ProductGrid() {
                 </div>
               )}
               <Image
-                src={product.colors[0].images[0]}
+                src={mainImage}
                 alt={product.name}
                 fill
                 sizes="(max-width: 768px) 50vw, (max-width: 1200px) 25vw, 25vw"
@@ -79,27 +109,31 @@ export default function ProductGrid() {
                 </h3>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="font-bold text-sm text-white">
-                    ₹ {product.price.toLocaleString()}
+                    ₹ {product.price ? product.price.toLocaleString() : '0'}
                   </span>
-                  <span className="text-xs text-zinc-500 line-through">
-                    ₹ {product.originalPrice.toLocaleString()}
-                  </span>
+                  {product.originalPrice && (
+                    <span className="text-xs text-zinc-500 line-through">
+                      ₹ {product.originalPrice.toLocaleString()}
+                    </span>
+                  )}
                 </div>
 
                 {/* Color Swatches */}
-                <div className="flex items-center gap-1.5 mt-2">
-                  {product.colors.map((color, idx) => (
-                    <div
-                      key={idx}
-                      title={color.name}
-                      className="w-3.5 h-3.5 rounded-full border border-zinc-700"
-                      style={{ backgroundColor: color.hex }}
-                    />
-                  ))}
-                  <span className="text-[11px] text-zinc-400 font-semibold ml-1">
-                    {product.colors.length} shades
-                  </span>
-                </div>
+                {product.colors && product.colors.length > 0 && (
+                  <div className="flex items-center gap-1.5 mt-2">
+                    {product.colors.map((color, idx) => (
+                      <div
+                        key={idx}
+                        title={color.name}
+                        className="w-3.5 h-3.5 rounded-full border border-zinc-700"
+                        style={{ backgroundColor: color.hex }}
+                      />
+                    ))}
+                    <span className="text-[11px] text-zinc-400 font-semibold ml-1">
+                      {product.colors.length} shades
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-2 text-zinc-400 shrink-0">
