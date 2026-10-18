@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   User,
@@ -15,6 +15,9 @@ import {
   Building,
   Home,
   CheckCircle2,
+  LogOut,
+  AlertCircle,
+  Loader2,
 } from 'lucide-react';
 import { useProfile } from '@/context/ProfileContext';
 
@@ -29,6 +32,12 @@ export default function ProfileDrawer() {
     setSelectedAddressId,
     addAddress,
     deleteAddress,
+    isAuthenticated,
+    logout,
+    isSaving,
+    profileDrawerNotice,
+    setProfileDrawerNotice,
+    profileDrawerInitialTab,
   } = useProfile();
 
   // Active sub-tab in panel
@@ -37,11 +46,13 @@ export default function ProfileDrawer() {
   // Local state for personal details editing
   const [formData, setFormData] = useState({ ...profile });
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [addressNotice, setAddressNotice] = useState('');
 
   // Address creation form states
   const [showAddAddressForm, setShowAddAddressForm] = useState(false);
   const [newAddr, setNewAddr] = useState({
-    name: `${profile.firstName} ${profile.lastName}`.trim() || '',
+    name: `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || '',
     phone: profile.contactNumber || '',
     street: '',
     city: '',
@@ -50,23 +61,55 @@ export default function ProfileDrawer() {
     tag: 'Home' as 'Home' | 'Work' | 'Other',
   });
 
-  if (!isProfileOpen) return null;
+  // Always declare hooks before any early returns
+  useEffect(() => {
+    setFormData({ ...profile });
+    if (!newAddr.name && (profile.firstName || profile.lastName)) {
+      setNewAddr((prev) => ({
+        ...prev,
+        name: `${profile.firstName} ${profile.lastName}`.trim(),
+        phone: profile.contactNumber || prev.phone,
+      }));
+    }
+  }, [profile]);
 
-  const handleSaveDetails = (e: React.FormEvent) => {
-    e.preventDefault();
-    updateProfile(formData);
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 2500);
+  useEffect(() => {
+    if (isProfileOpen && profileDrawerInitialTab) {
+      setActiveTab(profileDrawerInitialTab);
+    }
+  }, [isProfileOpen, profileDrawerInitialTab]);
+
+  if (!isProfileOpen || !isAuthenticated) return null;
+
+  const handleClose = () => {
+    setIsProfileOpen(false);
+    setProfileDrawerNotice('');
   };
 
-  const handleAddNewAddress = (e: React.FormEvent) => {
+  const handleSaveDetails = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage('');
+    const res = await updateProfile(formData);
+    if (res.success) {
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 3000);
+    } else {
+      setErrorMessage(res.error || 'Failed to update profile');
+    }
+  };
+
+  const handleAddNewAddress = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAddr.street || !newAddr.city || !newAddr.pincode) {
       alert('Please fill out all address fields');
       return;
     }
-    addAddress(newAddr);
+    const res = await addAddress(newAddr);
     setShowAddAddressForm(false);
+    if (res.success) {
+      setAddressNotice('Address saved to user account in database!');
+      setTimeout(() => setAddressNotice(''), 3000);
+    }
     setNewAddr({
       name: `${profile.firstName} ${profile.lastName}`.trim() || '',
       phone: profile.contactNumber || '',
@@ -83,7 +126,7 @@ export default function ProfileDrawer() {
       {/* Dark backdrop */}
       <div
         className="absolute inset-0 bg-black/80 backdrop-blur-sm transition-opacity"
-        onClick={() => setIsProfileOpen(false)}
+        onClick={handleClose}
       />
 
       {/* Slide-in panel from the LEFT - full width on mobile, max-w-md on tablet/desktop */}
@@ -106,13 +149,24 @@ export default function ProfileDrawer() {
             </div>
 
             <button
-              onClick={() => setIsProfileOpen(false)}
+              onClick={handleClose}
               className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-full transition-colors cursor-pointer"
               aria-label="Close profile panel"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
+
+          {/* WhatsApp Order Action Notice */}
+          {profileDrawerNotice && (
+            <div className="mx-4 sm:mx-6 mt-4 p-3.5 bg-amber-950/70 border border-amber-500/50 rounded-xl flex items-start gap-2.5 text-amber-200 text-xs animate-in fade-in">
+              <AlertCircle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+              <div>
+                <p className="font-bold text-amber-300 uppercase tracking-wide text-[11px]">Action Required For WhatsApp Order</p>
+                <p className="text-[11px] text-amber-200/90 mt-0.5 leading-relaxed">{profileDrawerNotice}</p>
+              </div>
+            </div>
+          )}
 
           {/* Navigation Sub-Tabs */}
           <div className="flex border-b border-zinc-800 bg-zinc-900/50 p-1 gap-1">
@@ -152,10 +206,26 @@ export default function ProfileDrawer() {
                   </h3>
                   {savedSuccess && (
                     <span className="text-[11px] font-bold text-emerald-400 flex items-center gap-1 animate-pulse">
-                      <Check className="w-3.5 h-3.5" /> Saved Successfully!
+                      <Check className="w-3.5 h-3.5" /> Saved to DB!
                     </span>
                   )}
                 </div>
+
+                {/* Success Banner */}
+                {savedSuccess && (
+                  <div className="p-3 bg-emerald-950/60 border border-emerald-500/40 rounded-lg flex items-center gap-2 text-emerald-400 text-xs animate-in fade-in">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>Profile details updated successfully in user table!</span>
+                  </div>
+                )}
+
+                {/* Error Banner */}
+                {errorMessage && (
+                  <div className="p-3 bg-red-950/60 border border-red-500/40 rounded-lg flex items-center gap-2 text-red-400 text-xs animate-in fade-in">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{errorMessage}</span>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -273,10 +343,20 @@ export default function ProfileDrawer() {
                 <div className="pt-2">
                   <button
                     type="submit"
-                    className="w-full py-3 bg-[#fef08a] text-black font-black text-xs uppercase tracking-widest hover:bg-yellow-300 transition-colors flex items-center justify-center gap-2 rounded cursor-pointer shadow-lg"
+                    disabled={isSaving}
+                    className="w-full py-3 bg-[#fef08a] disabled:opacity-50 text-black font-black text-xs uppercase tracking-widest hover:bg-yellow-300 transition-colors flex items-center justify-center gap-2 rounded cursor-pointer shadow-lg"
                   >
-                    <Save className="w-4 h-4" />
-                    <span>Save Personal Details</span>
+                    {isSaving ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Updating Database...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4" />
+                        <span>Save Personal Details</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </form>
@@ -303,6 +383,14 @@ export default function ProfileDrawer() {
                     <span>{showAddAddressForm ? 'Cancel' : 'Add New'}</span>
                   </button>
                 </div>
+
+                {/* Address Success Notice */}
+                {addressNotice && (
+                  <div className="p-3 bg-emerald-950/60 border border-emerald-500/40 rounded-lg flex items-center gap-2 text-emerald-400 text-xs animate-in fade-in">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>{addressNotice}</span>
+                  </div>
+                )}
 
                 {/* Inline New Address Form */}
                 {showAddAddressForm && (
@@ -401,9 +489,17 @@ export default function ProfileDrawer() {
 
                     <button
                       type="submit"
-                      className="w-full py-2 bg-[#fef08a] text-black font-bold text-xs uppercase rounded hover:bg-yellow-300 transition-colors cursor-pointer"
+                      disabled={isSaving}
+                      className="w-full py-2 bg-[#fef08a] disabled:opacity-50 text-black font-bold text-xs uppercase rounded hover:bg-yellow-300 transition-colors cursor-pointer flex items-center justify-center gap-2"
                     >
-                      Save Address
+                      {isSaving ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Saving Address to DB...</span>
+                        </>
+                      ) : (
+                        <span>Save Address</span>
+                      )}
                     </button>
                   </form>
                 )}
@@ -492,6 +588,18 @@ export default function ProfileDrawer() {
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Drawer Footer with Logout Action */}
+          <div className="p-4 sm:p-5 border-t border-zinc-800 bg-black mt-auto">
+            <button
+              type="button"
+              onClick={logout}
+              className="w-full py-3 bg-zinc-900 hover:bg-red-950/40 text-zinc-300 hover:text-red-400 border border-zinc-800 hover:border-red-800/50 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer"
+            >
+              <LogOut className="w-4 h-4 text-red-400" />
+              <span>Log Out of Account</span>
+            </button>
           </div>
         </div>
       </div>

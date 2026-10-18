@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
@@ -18,7 +18,7 @@ import {
 import { Product, getAllProducts } from '@/data/products';
 import { useCart } from '@/context/CartContext';
 import { useProfile } from '@/context/ProfileContext';
-import { createWhatsAppOrderUrl } from '@/utils/whatsapp';
+import { createWhatsAppOrderUrl, createWhatsAppRebookUrl } from '@/utils/whatsapp';
 import { fetchRelatedProducts } from '@/utils/api';
 
 interface Props {
@@ -31,7 +31,12 @@ export default function ProductDetailClient({
   initialRelatedProducts,
 }: Props) {
   const { addToCart } = useCart();
-  const { profile, addresses, selectedAddressId } = useProfile();
+  const {
+    profile,
+    addresses,
+    selectedAddressId,
+    requireWhatsAppPrerequisites,
+  } = useProfile();
   const allProducts = getAllProducts();
 
   const [relatedProducts, setRelatedProducts] = useState<Product[]>(() => {
@@ -104,6 +109,56 @@ export default function ProductDetailClient({
     setQuantity((prev) => Math.max(1, Math.min(10, prev + delta)));
   };
 
+  // Find exact matching variant for selected color and size
+  const currentVariant = useMemo(() => {
+    if (!product.variants || product.variants.length === 0) return null;
+    return (
+      product.variants.find((v: any) => {
+        const vColorName = (v.color?.name || '').toLowerCase();
+        const vSize = (v.size?.code || v.size?.name || '').toLowerCase();
+        const matchColor =
+          !vColorName || vColorName === activeColor.name.toLowerCase();
+        const matchSize = !vSize || vSize === selectedSize.toLowerCase();
+        return matchColor && matchSize;
+      }) || null
+    );
+  }, [product.variants, activeColor.name, selectedSize]);
+
+  // Determine if currently selected combination is out of stock
+  const currentStock = useMemo(() => {
+    if (currentVariant) {
+      return typeof currentVariant.stock === 'number'
+        ? currentVariant.stock
+        : parseInt(currentVariant.stock, 10) || 0;
+    }
+    if (typeof product.stock === 'number') {
+      return product.stock;
+    }
+    return 15;
+  }, [currentVariant, product.stock]);
+
+  const isOutOfStock = currentStock <= 0;
+
+  // Check if a specific size is out of stock for the active color
+  const isSizeOutOfStock = (sizeToCheck: string) => {
+    if (!product.variants || product.variants.length === 0) {
+      return product.stock !== undefined ? product.stock <= 0 : false;
+    }
+    const variantForSize = product.variants.find((v: any) => {
+      const vColorName = (v.color?.name || '').toLowerCase();
+      const vSize = (v.size?.code || v.size?.name || '').toLowerCase();
+      const matchColor =
+        !vColorName || vColorName === activeColor.name.toLowerCase();
+      return matchColor && vSize === sizeToCheck.toLowerCase();
+    });
+    if (!variantForSize) return false;
+    const st =
+      typeof variantForSize.stock === 'number'
+        ? variantForSize.stock
+        : parseInt(variantForSize.stock, 10) || 0;
+    return st <= 0;
+  };
+
   // Auto calculate amount
   const itemTotalAmount = product.price * quantity;
   const originalTotalAmount = product.originalPrice * quantity;
@@ -111,6 +166,30 @@ export default function ProductDetailClient({
   const discountPercent = Math.round(
     ((product.originalPrice - product.price) / product.originalPrice) * 100
   );
+
+  const handleRebookWhatsApp = () => {
+    if (!requireWhatsAppPrerequisites({ actionDescription: 'send an out-of-stock rebook enquiry via WhatsApp' })) {
+      return;
+    }
+    const url = createWhatsAppRebookUrl({
+      productName: product.name,
+      color: activeColor.name,
+      size: selectedSize,
+      price: product.price,
+      productId: product.id,
+      customer: {
+        firstName: profile.firstName,
+        lastName: profile.lastName,
+        contactNumber: profile.contactNumber,
+        whatsappNumber: profile.whatsappNumber || profile.contactNumber,
+        email: profile.email,
+      },
+    });
+
+    if (typeof window !== 'undefined') {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  };
 
   const handleAddToCart = () => {
     addToCart({
@@ -127,6 +206,9 @@ export default function ProductDetailClient({
   };
 
   const handleInstantWhatsAppBuy = () => {
+    if (!requireWhatsAppPrerequisites({ actionDescription: 'purchase directly on WhatsApp' })) {
+      return;
+    }
     const selectedAddress = addresses.find((a) => a.id === selectedAddressId) || addresses[0];
     const instantShipping = itemTotalAmount > 1999 ? 0 : 149;
     const instantFinalAmount = itemTotalAmount + instantShipping;
@@ -149,6 +231,7 @@ export default function ProductDetailClient({
         firstName: profile.firstName,
         lastName: profile.lastName,
         contactNumber: profile.contactNumber,
+        whatsappNumber: profile.whatsappNumber || profile.contactNumber,
         email: profile.email,
       },
       address: selectedAddress
@@ -186,12 +269,12 @@ export default function ProductDetailClient({
         </span>
       </nav>
 
-      {/* Main Grid: Left Side Images | Right Side Details */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 lg:gap-12 items-start">
-        {/* ================= LEFT SIDE: MULTIPLE T-SHIRT IMAGES ================= */}
-        <div className="lg:col-span-7 flex flex-col-reverse md:flex-row gap-3 sm:gap-4">
+      {/* Main Grid: Left Side Images (Sticky) | Right Side Details (Scrolling) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 lg:gap-12 items-start relative">
+        {/* ================= LEFT SIDE: MULTIPLE T-SHIRT IMAGES (STICKY) ================= */}
+        <div className="lg:col-span-7 lg:sticky lg:top-24 self-start flex flex-col-reverse md:flex-row gap-3 sm:gap-4">
           {/* Vertical Thumbnails on tablet/desktop, horizontal touch-swipe on mobile */}
-          <div className="flex md:flex-col gap-2.5 sm:gap-3 overflow-x-auto md:overflow-y-auto no-scrollbar md:w-20 lg:w-24 shrink-0 pb-1 md:pb-0">
+          <div className="flex md:flex-col gap-2.5 sm:gap-3 overflow-x-auto md:overflow-y-auto no-scrollbar md:w-20 lg:w-24 shrink-0 pb-1 md:pb-0 max-h-[75vh]">
             {activeImages.map((imgUrl, idx) => {
               const isSelected = idx === activeImageIndex;
               return (
@@ -222,7 +305,7 @@ export default function ProductDetailClient({
           </div>
 
           {/* Large Main Feature Image Display */}
-          <div className="flex-1 relative aspect-[3/4] sm:aspect-[4/5] lg:aspect-[3/4] bg-zinc-950 rounded-lg sm:rounded-xl overflow-hidden border border-zinc-800/80 shadow-2xl group">
+          <div className="flex-1 relative aspect-[3/4] sm:aspect-[4/5] lg:aspect-[3/4] lg:max-h-[calc(100vh-8rem)] bg-zinc-950 rounded-lg sm:rounded-xl overflow-hidden border border-zinc-800/80 shadow-2xl group">
             {product.isNew && (
               <div className="absolute top-4 left-4 z-20 bg-[#fef08a] text-black text-xs font-black uppercase tracking-wider px-3 py-1 shadow-md">
                 New In
@@ -263,21 +346,34 @@ export default function ProductDetailClient({
               <span className="bg-black/70 backdrop-blur-md text-[11px] font-semibold text-zinc-300 px-3 py-1 rounded border border-zinc-800">
                 {activeColor.name} • View {activeImageIndex + 1} of {activeImages.length}
               </span>
-              <span className="bg-emerald-950/80 backdrop-blur-md text-[11px] font-bold text-emerald-400 px-3 py-1 rounded border border-emerald-800/40">
-                In Stock
-              </span>
+              {isOutOfStock ? (
+                <span className="bg-red-950/90 backdrop-blur-md text-[11px] font-black text-red-400 px-3 py-1 rounded border border-red-800/60 uppercase tracking-wider flex items-center gap-1.5 shadow-lg">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" />
+                  Out of Stock
+                </span>
+              ) : (
+                <span className="bg-emerald-950/80 backdrop-blur-md text-[11px] font-bold text-emerald-400 px-3 py-1 rounded border border-emerald-800/40">
+                  In Stock
+                </span>
+              )}
             </div>
           </div>
         </div>
 
-        {/* ================= RIGHT SIDE: DETAILS, COLOR, SIZE, QUANTITY, AUTO CALCULATE ================= */}
-        <div className="lg:col-span-5 flex flex-col lg:sticky lg:top-24">
+        {/* ================= RIGHT SIDE: DETAILS, COLOR, SIZE, QUANTITY, AUTO CALCULATE (SCROLLING) ================= */}
+        <div className="lg:col-span-5 flex flex-col">
           {/* Header & Title */}
           <div>
-            <div className="flex items-center gap-2 mb-1.5 sm:mb-2">
+            <div className="flex items-center gap-2 mb-1.5 sm:mb-2 flex-wrap">
               <span className="text-[11px] sm:text-xs uppercase font-extrabold text-[#fef08a] tracking-widest">
                 Stylish Fox Signature
               </span>
+              {isOutOfStock && (
+                <span className="bg-red-600/95 backdrop-blur-md text-white text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded shadow flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                  OUT OF STOCK
+                </span>
+              )}
             </div>
 
             <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-white uppercase tracking-tight leading-tight mb-1 sm:mb-2">
@@ -353,18 +449,29 @@ export default function ProductDetailClient({
             <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
               {product.sizes.map((size) => {
                 const isSelected = size === selectedSize;
+                const sizeOutOfStock = isSizeOutOfStock(size);
+
                 return (
                   <button
                     key={size}
                     type="button"
                     onClick={() => setSelectedSize(size)}
-                    className={`py-2 sm:py-2.5 rounded text-[11px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                    className={`py-2 sm:py-2.5 rounded text-[11px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer border flex flex-col items-center justify-center ${
                       isSelected
-                        ? 'bg-[#fef08a] text-black border-[#fef08a] shadow-lg shadow-yellow-500/10'
+                        ? sizeOutOfStock
+                          ? 'bg-red-500/20 text-red-300 border-red-500 ring-1 ring-red-500'
+                          : 'bg-[#fef08a] text-black border-[#fef08a] shadow-lg shadow-yellow-500/10'
+                        : sizeOutOfStock
+                        ? 'bg-zinc-950/70 text-zinc-500 border-zinc-800/80 hover:border-zinc-700'
                         : 'bg-zinc-900/80 text-zinc-300 border-zinc-800 hover:border-zinc-600 hover:text-white'
                     }`}
                   >
-                    {size}
+                    <span>{size}</span>
+                    {sizeOutOfStock && (
+                      <span className="text-[8px] font-bold text-red-400 mt-0.5 tracking-tight leading-none">
+                        Out of stock
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -377,9 +484,16 @@ export default function ProductDetailClient({
               <span className="text-[11px] sm:text-xs uppercase font-bold text-zinc-400 tracking-wider">
                 Quantity
               </span>
-              <span className="text-[10px] sm:text-[11px] text-emerald-400 font-semibold">
-                ✓ Ready for immediate dispatch
-              </span>
+              {isOutOfStock ? (
+                <span className="text-[10px] sm:text-[11px] text-red-400 font-bold flex items-center gap-1.5 bg-red-950/50 border border-red-800/50 px-2 py-0.5 rounded">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                  OUT OF STOCK • Rebook Available
+                </span>
+              ) : (
+                <span className="text-[10px] sm:text-[11px] text-emerald-400 font-semibold">
+                  ✓ Ready for immediate dispatch
+                </span>
+              )}
             </div>
 
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
@@ -387,7 +501,7 @@ export default function ProductDetailClient({
                 <button
                   type="button"
                   onClick={() => handleQuantityChange(-1)}
-                  disabled={quantity <= 1}
+                  disabled={quantity <= 1 || isOutOfStock}
                   className="w-8 h-8 rounded flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer"
                   aria-label="Decrease quantity"
                 >
@@ -399,7 +513,7 @@ export default function ProductDetailClient({
                 <button
                   type="button"
                   onClick={() => handleQuantityChange(1)}
-                  disabled={quantity >= 10}
+                  disabled={quantity >= 10 || isOutOfStock}
                   className="w-8 h-8 rounded flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer"
                   aria-label="Increase quantity"
                 >
@@ -435,38 +549,75 @@ export default function ProductDetailClient({
 
           {/* Action CTAs */}
           <div className="py-6 space-y-3">
-            <button
-              type="button"
-              onClick={handleAddToCart}
-              className={`w-full py-4 font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xl ${
-                isAdded
-                  ? 'bg-emerald-500 text-black shadow-emerald-500/20'
-                  : 'bg-[#fef08a] text-black hover:bg-yellow-300 shadow-yellow-500/10 active:scale-[0.99]'
-              }`}
-            >
-              {isAdded ? (
-                <>
-                  <Check className="w-4 h-4 stroke-[3]" />
-                  <span>Added To Cart! (₹ {itemTotalAmount.toLocaleString()})</span>
-                </>
-              ) : (
-                <>
-                  <ShoppingBag className="w-4 h-4" />
-                  <span>
-                    Add To Cart • ₹ {itemTotalAmount.toLocaleString()}
-                  </span>
-                </>
-              )}
-            </button>
+            {isOutOfStock ? (
+              <>
+                {/* Out of Stock Notice Box */}
+                <div className="p-3.5 bg-red-950/30 border border-red-800/50 rounded-lg text-left space-y-1">
+                  <div className="flex items-center gap-2 text-red-400 text-xs font-black uppercase tracking-wider">
+                    <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                    Currently Out of Stock ({activeColor.name} • Size {selectedSize})
+                  </div>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    This variant is temporarily sold out in our warehouse. Send a WhatsApp Rebook Enquiry to reserve your piece from our upcoming restock batch!
+                  </p>
+                </div>
 
-            <button
-              type="button"
-              onClick={handleInstantWhatsAppBuy}
-              className="w-full py-3.5 bg-zinc-900 hover:bg-[#25D366] hover:text-black text-white font-black text-xs uppercase tracking-widest border border-zinc-700 hover:border-[#25D366] transition-all flex items-center justify-center gap-2 cursor-pointer rounded shadow-md group"
-            >
-              <MessageCircle className="w-4 h-4 text-[#25D366] group-hover:text-black group-hover:fill-black transition-colors" />
-              <span>Instant Buy WhatsApp</span>
-            </button>
+                {/* Primary WhatsApp Rebook CTA */}
+                <button
+                  type="button"
+                  onClick={handleRebookWhatsApp}
+                  className="w-full py-4 bg-[#25D366] hover:bg-[#20bd5a] text-black font-black text-xs md:text-sm uppercase tracking-widest rounded transition-all flex items-center justify-center gap-2.5 shadow-xl shadow-[#25D366]/20 active:scale-[0.99] cursor-pointer"
+                >
+                  <MessageCircle className="w-5 h-5 fill-black" />
+                  <span>Send Rebook Enquiry on WhatsApp</span>
+                </button>
+
+                {/* Disabled Add To Cart */}
+                <button
+                  type="button"
+                  disabled
+                  className="w-full py-3.5 bg-zinc-900 border border-zinc-800 text-zinc-500 font-bold text-xs uppercase tracking-widest rounded flex items-center justify-center gap-2 cursor-not-allowed opacity-60"
+                >
+                  <ShoppingBag className="w-4 h-4" />
+                  <span>Sold Out • Add To Bag Disabled</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={handleAddToCart}
+                  className={`w-full py-4 font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xl ${
+                    isAdded
+                      ? 'bg-emerald-500 text-black shadow-emerald-500/20'
+                      : 'bg-[#fef08a] text-black hover:bg-yellow-300 shadow-yellow-500/10 active:scale-[0.99]'
+                  }`}
+                >
+                  {isAdded ? (
+                    <>
+                      <Check className="w-4 h-4 stroke-[3]" />
+                      <span>Added To Cart! (₹ {itemTotalAmount.toLocaleString()})</span>
+                    </>
+                  ) : (
+                    <>
+                      <ShoppingBag className="w-4 h-4" />
+                      <span>
+                        Add To Cart • ₹ {itemTotalAmount.toLocaleString()}
+                      </span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleInstantWhatsAppBuy}
+                  className="w-full py-3.5 bg-zinc-900 hover:bg-[#25D366] hover:text-black text-white font-black text-xs uppercase tracking-widest border border-zinc-700 hover:border-[#25D366] transition-all flex items-center justify-center gap-2 cursor-pointer rounded shadow-md group"
+                >
+                  <MessageCircle className="w-4 h-4 text-[#25D366] group-hover:text-black group-hover:fill-black transition-colors" />
+                  <span>Instant Buy WhatsApp</span>
+                </button>
+              </>
+            )}
           </div>
 
           {/* Trust badges */}
@@ -514,6 +665,26 @@ export default function ProductDetailClient({
                   </li>
                 ))}
               </ul>
+            </div>
+
+            {/* Fabric & Care Specs */}
+            <div className="pt-2 border-t border-zinc-800/80">
+              <h3 className="text-[11px] sm:text-xs uppercase font-extrabold text-zinc-300 tracking-wider mb-1.5 sm:mb-2">
+                Fabric & Care
+              </h3>
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                100% Super-combed heavyweight organic cotton (240 GSM). Bio-washed for ultimate softness and zero shrinkage. Machine wash cold inside-out with like colors. Do not iron directly on prints.
+              </p>
+            </div>
+
+            {/* Shipping & Delivery Info */}
+            <div className="pt-2 border-t border-zinc-800/80">
+              <h3 className="text-[11px] sm:text-xs uppercase font-extrabold text-zinc-300 tracking-wider mb-1.5 sm:mb-2">
+                Shipping & Returns
+              </h3>
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                Dispatched within 24 hours. Free express shipping across India on orders above ₹1,999. Easy 7-day doorstep size replacement and exchanges available.
+              </p>
             </div>
           </div>
         </div>

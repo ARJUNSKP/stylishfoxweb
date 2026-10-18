@@ -74,7 +74,7 @@ function ProductDetailSkeleton() {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-pulse">
       <div className="h-4 w-32 bg-zinc-800 rounded mb-6" />
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <div className="lg:col-span-7 aspect-[3/4] bg-zinc-900 rounded-xl border border-zinc-800/80" />
+        <div className="lg:col-span-7 lg:sticky lg:top-24 self-start aspect-[3/4] bg-zinc-900 rounded-xl border border-zinc-800/80" />
         <div className="lg:col-span-5 space-y-5">
           <div className="h-8 w-3/4 bg-zinc-800 rounded" />
           <div className="h-6 w-1/3 bg-zinc-800 rounded" />

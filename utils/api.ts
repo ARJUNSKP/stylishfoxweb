@@ -84,6 +84,24 @@ export function transformBackendProduct(raw: any, index: number = 0): Product {
     ? parseFloat(raw.originalPrice)
     : Math.round(price * 1.4);
 
+  // Calculate total stock across all variants
+  let stock = 0;
+  if (variants.length > 0) {
+    stock = variants.reduce(
+      (sum: number, v: any) =>
+        sum + (typeof v.stock === 'number' ? v.stock : parseInt(v.stock, 10) || 0),
+      0
+    );
+  } else if (typeof raw.stock === 'number') {
+    stock = raw.stock;
+  } else if (raw.stock !== undefined) {
+    stock = parseInt(raw.stock, 10) || 0;
+  } else {
+    stock = 15;
+  }
+
+  const isOutOfStock = stock <= 0;
+
   return {
     id: raw.id || index + 1,
     slug: raw.slug,
@@ -103,6 +121,8 @@ export function transformBackendProduct(raw: any, index: number = 0): Product {
     images: Array.isArray(raw.images) ? raw.images : [],
     variants,
     categoryId: raw.categoryId || null,
+    stock,
+    isOutOfStock,
   };
 }
 
@@ -118,7 +138,7 @@ export async function fetchProducts(options?: {
     const query = new URLSearchParams();
     if (options?.categoryId) query.set('categoryId', options.categoryId);
     if (options?.search) query.set('search', options.search);
-    if (options?.limit) query.set('limit', String(options.limit));
+    query.set('limit', String(options?.limit || 50));
 
     const url = `${API_BASE_URL}/products?${query.toString()}`;
     const res = await fetch(url, {
@@ -224,4 +244,178 @@ export async function fetchRelatedProducts(
   return productsData
     .filter((p) => String(p.id) !== String(idOrSlug))
     .slice(0, limit);
+}
+
+/**
+ * Log in user with email & password via Backend API
+ */
+export async function loginUser(input: { email: string; password: string }) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      data: { success: false, message: err.message || 'Network connection failed' },
+    };
+  }
+}
+
+/**
+ * Register a new user via Backend API
+ */
+export async function registerUser(input: {
+  name: string;
+  email: string;
+  password: string;
+  phoneNumber?: string;
+}) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      data: { success: false, message: err.message || 'Network connection failed' },
+    };
+  }
+}
+
+/**
+ * Fetch authenticated user profile & addresses from Backend API
+ */
+export async function fetchUserProfile(token: string) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/users/profile`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      data: { success: false, message: err.message || 'Network connection failed' },
+    };
+  }
+}
+
+/**
+ * Update user profile details (name, phone, whatsapp, addresses) in user table via Backend API
+ */
+export async function updateUserProfile(
+  token: string,
+  payload: {
+    name?: string;
+    phoneNumber?: string | null;
+    whatsappNumber?: string | null;
+    avatarUrl?: string | null;
+    address?: any[];
+  }
+) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/users/profile`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      data: { success: false, message: err.message || 'Network connection failed' },
+    };
+  }
+}
+
+/**
+ * Add a new address directly to the user's account in user table via Backend API
+ */
+export async function addUserAddress(
+  token: string,
+  payload: { address: any; ActiveAddress?: boolean }
+) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/users/address`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      data: { success: false, message: err.message || 'Network connection failed' },
+    };
+  }
+}
+
+/**
+ * Set active/default address for the user via Backend API
+ */
+export async function setActiveUserAddress(token: string, index: number) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/users/address/active`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ index }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      data: { success: false, message: err.message || 'Network connection failed' },
+    };
+  }
+}
+
+/**
+ * Delete an address by index from the user table via Backend API
+ */
+export async function deleteUserAddress(token: string, index: number) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/users/address/${index}`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      data: { success: false, message: err.message || 'Network connection failed' },
+    };
+  }
 }

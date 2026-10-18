@@ -5,6 +5,7 @@ import { CartProvider } from "@/context/CartContext";
 import CartDrawer from "@/components/CartDrawer";
 import { ProfileProvider } from "@/context/ProfileContext";
 import ProfileDrawer from "@/components/ProfileDrawer";
+import AuthModal from "@/components/AuthModal";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -34,6 +35,7 @@ export default function RootLayout({
             {children}
             <CartDrawer />
             <ProfileDrawer />
+            <AuthModal />
           </CartProvider>
         </ProfileProvider>
       </body>

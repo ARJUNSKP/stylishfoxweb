@@ -1,6 +1,15 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import {
+  loginUser,
+  registerUser,
+  fetchUserProfile,
+  updateUserProfile,
+  addUserAddress,
+  setActiveUserAddress,
+  deleteUserAddress,
+} from '@/utils/api';
 
 export interface Address {
   id: string;
@@ -23,99 +32,245 @@ export interface UserProfile {
   email: string;
 }
 
+export interface AuthUser {
+  id: string;
+  name: string;
+  email: string;
+  role?: string;
+  avatarUrl?: string;
+  phoneNumber?: string;
+}
+
 interface ProfileContextType {
+  // Auth state & modals
+  isAuthenticated: boolean;
+  user: AuthUser | null;
+  token: string | null;
+  isAuthModalOpen: boolean;
+  setIsAuthModalOpen: (open: boolean) => void;
+  authModalMode: 'login' | 'register';
+  setAuthModalMode: (mode: 'login' | 'register') => void;
+  openProfileOrAuth: () => void;
+  login: (input: { email: string; password: string }) => Promise<{ success: boolean; error?: string }>;
+  register: (input: {
+    name: string;
+    email: string;
+    password: string;
+    phoneNumber?: string;
+  }) => Promise<{ success: boolean; error?: string }>;
+  logout: () => void;
+
+  // Profile details & drawer
   isProfileOpen: boolean;
   setIsProfileOpen: (open: boolean) => void;
   profile: UserProfile;
-  updateProfile: (updated: Partial<UserProfile>) => void;
+  updateProfile: (updated: Partial<UserProfile>) => Promise<{ success: boolean; error?: string }>;
   addresses: Address[];
   selectedAddressId: string;
   setSelectedAddressId: (id: string) => void;
-  addAddress: (addr: Omit<Address, 'id' | 'isDefault'>) => void;
-  deleteAddress: (id: string) => void;
+  addAddress: (addr: Omit<Address, 'id' | 'isDefault'>) => Promise<{ success: boolean; error?: string }>;
+  deleteAddress: (id: string) => Promise<{ success: boolean; error?: string }>;
   shippingAddresses: Address[];
   selectedShippingAddressId: string;
   setSelectedShippingAddressId: (id: string) => void;
   addShippingAddress: (addr: Omit<Address, 'id' | 'isDefault'>) => void;
   deleteShippingAddress: (id: string) => void;
+  isSaving: boolean;
+
+  // WhatsApp Checkout Prerequisites
+  authModalPrompt: string;
+  setAuthModalPrompt: (p: string) => void;
+  profileDrawerNotice: string;
+  setProfileDrawerNotice: (n: string) => void;
+  profileDrawerInitialTab: 'details' | 'addresses';
+  setProfileDrawerInitialTab: (tab: 'details' | 'addresses') => void;
+  hasWhatsappNumber: boolean;
+  hasDeliveryAddress: boolean;
+  requireWhatsAppPrerequisites: (options?: { actionDescription?: string }) => boolean;
 }
 
-const defaultProfile: UserProfile = {
-  firstName: 'Arjun',
-  lastName: 'Sivadas',
-  contactNumber: '+91 80863 88058',
-  whatsappNumber: '+91 80863 88058',
+const emptyProfile: UserProfile = {
+  firstName: '',
+  lastName: '',
+  contactNumber: '',
+  whatsappNumber: '',
   sameAsContact: true,
-  email: 'arjun@example.com',
+  email: '',
 };
 
-const defaultAddresses: Address[] = [
-  {
-    id: 'addr-1',
-    tag: 'Home',
-    name: 'Arjun Sivadas',
-    phone: '+91 80863 88058',
-    street: 'Flat 402, Skyline Luxury Apartments, MG Road',
-    city: 'Bengaluru',
-    state: 'Karnataka',
-    pincode: '560001',
-    isDefault: true,
-  },
-  {
-    id: 'addr-2',
-    tag: 'Work',
-    name: 'Arjun Sivadas',
-    phone: '+91 80863 88058',
-    street: 'Level 5, Cyber Park, Electronic City Phase 1',
-    city: 'Bengaluru',
-    state: 'Karnataka',
-    pincode: '560100',
-    isDefault: false,
-  },
-];
-
-const defaultShippingAddresses: Address[] = [
-  {
-    id: 'ship-1',
-    tag: 'Home',
-    name: 'Arjun Sivadas',
-    phone: '+91 80863 88058',
-    street: 'Flat 402, Skyline Luxury Apartments, MG Road',
-    city: 'Bengaluru',
-    state: 'Karnataka',
-    pincode: '560001',
-    isDefault: true,
-  },
-];
+export function parseBackendAddresses(rawAddresses: any[]): Address[] {
+  if (!Array.isArray(rawAddresses)) return [];
+  return rawAddresses.map((item, index) => {
+    const addr = item && typeof item === 'object' && item.address ? item.address : item;
+    const isActive = item?.ActiveAddress ?? addr?.isDefault ?? addr?.ActiveAddress ?? (index === 0);
+    return {
+      id: addr?.id || `addr-${index}-${Date.now()}`,
+      tag: (addr?.tag as any) || 'Home',
+      name: addr?.name || '',
+      phone: addr?.phone || '',
+      street: addr?.street || (typeof item?.address === 'string' ? item.address : ''),
+      city: addr?.city || '',
+      state: addr?.state || '',
+      pincode: addr?.pincode || '',
+      isDefault: Boolean(isActive),
+    };
+  });
+}
 
 const ProfileContext = createContext<ProfileContextType | undefined>(undefined);
 
 export function ProfileProvider({ children }: { children: React.ReactNode }) {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<'login' | 'register'>('login');
+  const [authModalPrompt, setAuthModalPrompt] = useState('');
+
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [profileDrawerNotice, setProfileDrawerNotice] = useState('');
+  const [profileDrawerInitialTab, setProfileDrawerInitialTab] = useState<'details' | 'addresses'>('details');
+  const [isSaving, setIsSaving] = useState(false);
   const isHydrated = useRef(false);
 
-  // Profile data
-  const [profile, setProfile] = useState<UserProfile>(defaultProfile);
+  // Profile data defaults to empty until user logs in or registers
+  const [profile, setProfile] = useState<UserProfile>(emptyProfile);
 
   // Billing / Main Addresses
-  const [addresses, setAddresses] = useState<Address[]>(defaultAddresses);
-  const [selectedAddressId, setSelectedAddressId] = useState<string>(
-    defaultAddresses[0]?.id || ''
-  );
+  const [addresses, setAddresses] = useState<Address[]>([]);
+  const [selectedAddressId, setSelectedAddressId] = useState<string>('');
 
   // Shipping Addresses
-  const [shippingAddresses, setShippingAddresses] = useState<Address[]>(
-    defaultShippingAddresses
-  );
-  const [selectedShippingAddressId, setSelectedShippingAddressId] = useState<string>(
-    defaultShippingAddresses[0]?.id || ''
+  const [shippingAddresses, setShippingAddresses] = useState<Address[]>([]);
+  const [selectedShippingAddressId, setSelectedShippingAddressId] = useState<string>('');
+
+  // WhatsApp Checkout Prerequisites Checks
+  const hasWhatsappNumber = Boolean(
+    profile.whatsappNumber?.trim() || profile.contactNumber?.trim()
   );
 
-  // Hydrate from localStorage once on client mount to eliminate SSR hydration mismatch
+  const hasDeliveryAddress =
+    addresses.length > 0 &&
+    addresses.some(
+      (a) => a.street?.trim() && a.city?.trim() && a.pincode?.trim()
+    );
+
+  const requireWhatsAppPrerequisites = (options?: { actionDescription?: string }): boolean => {
+    const action = options?.actionDescription || 'place your order via WhatsApp';
+
+    // 1. Must be signed in
+    if (!isAuthenticated) {
+      setAuthModalPrompt(`Please sign in or register to ${action}.`);
+      setAuthModalMode('register');
+      setIsAuthModalOpen(true);
+      return false;
+    }
+
+    // 2. Must have WhatsApp number
+    const hasPhone = Boolean(profile.whatsappNumber?.trim() || profile.contactNumber?.trim());
+
+    // 3. Must have a delivery address
+    const hasAddr =
+      addresses.length > 0 &&
+      addresses.some((a) => a.street?.trim() && a.city?.trim() && a.pincode?.trim());
+
+    if (!hasPhone && !hasAddr) {
+      setProfileDrawerNotice(
+        `Please add your WhatsApp number and delivery address to ${action}.`
+      );
+      setProfileDrawerInitialTab('details');
+      setIsProfileOpen(true);
+      return false;
+    }
+
+    if (!hasPhone) {
+      setProfileDrawerNotice(
+        `Please add your WhatsApp contact number to ${action}.`
+      );
+      setProfileDrawerInitialTab('details');
+      setIsProfileOpen(true);
+      return false;
+    }
+
+    if (!hasAddr) {
+      setProfileDrawerNotice(
+        `Please add your delivery address to ${action}.`
+      );
+      setProfileDrawerInitialTab('addresses');
+      setIsProfileOpen(true);
+      return false;
+    }
+
+    return true;
+  };
+
+  // Sync fresh profile & addresses from Backend DB
+  const syncProfileFromBackend = async (jwtToken: string) => {
+    try {
+      const res = await fetchUserProfile(jwtToken);
+      if (res.ok && res.data?.success && res.data?.data) {
+        const u = res.data.data;
+        const names = (u.name || '').trim().split(/\s+/);
+        const fetchedProfile: UserProfile = {
+          firstName: names[0] || 'Member',
+          lastName: names.slice(1).join(' ') || '',
+          email: u.email || '',
+          contactNumber: u.phoneNumber || '',
+          whatsappNumber: u.whatsappNumber || u.phoneNumber || '',
+          sameAsContact: !u.whatsappNumber || u.whatsappNumber === u.phoneNumber,
+        };
+        setProfile(fetchedProfile);
+        setUser({
+          id: u.id,
+          name: u.name,
+          email: u.email,
+          role: u.role,
+          avatarUrl: u.avatarUrl,
+          phoneNumber: u.phoneNumber,
+        });
+
+        if (Array.isArray(u.address) && u.address.length > 0) {
+          const parsed = parseBackendAddresses(u.address);
+          setAddresses(parsed);
+          const activeOne = parsed.find((a) => a.isDefault) || parsed[0];
+          if (activeOne) {
+            setSelectedAddressId(activeOne.id);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[ProfileContext] Error syncing profile from backend:', err);
+    }
+  };
+
+  // Hydrate from localStorage once on client mount
   useEffect(() => {
     try {
+      const savedToken = localStorage.getItem('stylefox_token');
+      const savedUser = localStorage.getItem('stylefox_user');
       const savedProfile = localStorage.getItem('stylefox_profile');
-      if (savedProfile) setProfile(JSON.parse(savedProfile));
+
+      if (savedToken && savedUser) {
+        setToken(savedToken);
+        const parsedUser = JSON.parse(savedUser);
+        setIsAuthenticated(true);
+        setUser(parsedUser);
+        if (savedProfile) {
+          setProfile(JSON.parse(savedProfile));
+        } else {
+          const names = (parsedUser.name || '').trim().split(/\s+/);
+          setProfile({
+            firstName: names[0] || 'Member',
+            lastName: names.slice(1).join(' ') || '',
+            email: parsedUser.email || '',
+            contactNumber: parsedUser.phoneNumber || '',
+            whatsappNumber: parsedUser.phoneNumber || '',
+            sameAsContact: true,
+          });
+        }
+        // Sync latest data from backend user table
+        syncProfileFromBackend(savedToken);
+      }
 
       const savedAddresses = localStorage.getItem('stylefox_addresses');
       if (savedAddresses) setAddresses(JSON.parse(savedAddresses));
@@ -141,9 +296,11 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isHydrated.current) return;
     try {
-      localStorage.setItem('stylefox_profile', JSON.stringify(profile));
+      if (isAuthenticated) {
+        localStorage.setItem('stylefox_profile', JSON.stringify(profile));
+      }
     } catch {}
-  }, [profile]);
+  }, [profile, isAuthenticated]);
 
   useEffect(() => {
     if (!isHydrated.current) return;
@@ -179,34 +336,273 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   }, [selectedShippingAddressId]);
 
-  const updateProfile = (updated: Partial<UserProfile>) => {
-    setProfile((prev) => {
-      const next = { ...prev, ...updated };
-      if (next.sameAsContact) {
-        next.whatsappNumber = next.contactNumber;
-      }
-      return next;
-    });
+  const openProfileOrAuth = () => {
+    if (isAuthenticated) {
+      setProfileDrawerNotice('');
+      setIsProfileOpen(true);
+    } else {
+      setAuthModalPrompt('');
+      setAuthModalMode('login');
+      setIsAuthModalOpen(true);
+    }
   };
 
-  const addAddress = (addr: Omit<Address, 'id' | 'isDefault'>) => {
+  const login = async (input: { email: string; password: string }) => {
+    const res = await loginUser(input);
+    if (res.ok && res.data.success && res.data.data) {
+      const { user: userData, token: jwtToken } = res.data.data;
+      const names = (userData.name || '').trim().split(/\s+/);
+      const newProfile: UserProfile = {
+        firstName: names[0] || 'Member',
+        lastName: names.slice(1).join(' ') || '',
+        email: userData.email || input.email,
+        contactNumber: userData.phoneNumber || '',
+        whatsappNumber: userData.whatsappNumber || userData.phoneNumber || '',
+        sameAsContact: !userData.whatsappNumber || userData.whatsappNumber === userData.phoneNumber,
+      };
+
+      setToken(jwtToken);
+      setUser(userData);
+      setProfile(newProfile);
+      setIsAuthenticated(true);
+      setIsAuthModalOpen(false);
+
+      if (Array.isArray(userData.address) && userData.address.length > 0) {
+        const parsed = parseBackendAddresses(userData.address);
+        setAddresses(parsed);
+        const activeOne = parsed.find((a) => a.isDefault) || parsed[0];
+        if (activeOne) setSelectedAddressId(activeOne.id);
+      }
+
+      try {
+        localStorage.setItem('stylefox_token', jwtToken);
+        localStorage.setItem('stylefox_user', JSON.stringify(userData));
+        localStorage.setItem('stylefox_profile', JSON.stringify(newProfile));
+      } catch {}
+
+      // Fetch fresh profile & addresses from database user table
+      syncProfileFromBackend(jwtToken);
+
+      // ONLY AFTER LOGIN: Open Profile Drawer so details are displayed!
+      setIsProfileOpen(true);
+      return { success: true };
+    }
+
+    return {
+      success: false,
+      error: res.data?.message || 'Invalid email or password. Please try again.',
+    };
+  };
+
+  const register = async (input: {
+    name: string;
+    email: string;
+    password: string;
+    phoneNumber?: string;
+  }) => {
+    const res = await registerUser(input);
+    if (res.ok && res.data.success && res.data.data) {
+      const { user: userData, token: jwtToken } = res.data.data;
+      const names = (userData.name || input.name || '').trim().split(/\s+/);
+      const newProfile: UserProfile = {
+        firstName: names[0] || 'Member',
+        lastName: names.slice(1).join(' ') || '',
+        email: userData.email || input.email,
+        contactNumber: userData.phoneNumber || input.phoneNumber || '',
+        whatsappNumber: userData.whatsappNumber || userData.phoneNumber || input.phoneNumber || '',
+        sameAsContact: true,
+      };
+
+      setToken(jwtToken);
+      setUser(userData);
+      setProfile(newProfile);
+      setIsAuthenticated(true);
+      setIsAuthModalOpen(false);
+
+      try {
+        localStorage.setItem('stylefox_token', jwtToken);
+        localStorage.setItem('stylefox_user', JSON.stringify(userData));
+        localStorage.setItem('stylefox_profile', JSON.stringify(newProfile));
+      } catch {}
+
+      // Fetch fresh profile & addresses from database user table
+      syncProfileFromBackend(jwtToken);
+
+      // ONLY AFTER REGISTER: Open Profile Drawer so details are displayed!
+      setIsProfileOpen(true);
+      return { success: true };
+    }
+
+    return {
+      success: false,
+      error: res.data?.message || 'Registration failed. Email may already be in use.',
+    };
+  };
+
+  const logout = () => {
+    setIsAuthenticated(false);
+    setUser(null);
+    setToken(null);
+    setProfile(emptyProfile);
+    setAddresses([]);
+    setSelectedAddressId('');
+    setIsProfileOpen(false);
+    try {
+      localStorage.removeItem('stylefox_token');
+      localStorage.removeItem('stylefox_user');
+      localStorage.removeItem('stylefox_profile');
+      localStorage.removeItem('stylefox_addresses');
+      localStorage.removeItem('stylefox_selected_address');
+    } catch {}
+  };
+
+  // Update profile in local state and in backend database user table
+  const updateProfile = async (
+    updated: Partial<UserProfile>
+  ): Promise<{ success: boolean; error?: string }> => {
+    const next: UserProfile = { ...profile, ...updated };
+    if (next.sameAsContact) {
+      next.whatsappNumber = next.contactNumber;
+    }
+    setProfile(next);
+    try {
+      localStorage.setItem('stylefox_profile', JSON.stringify(next));
+    } catch {}
+
+    const currentToken =
+      token || (typeof window !== 'undefined' ? localStorage.getItem('stylefox_token') : null);
+
+    if (currentToken) {
+      setIsSaving(true);
+      try {
+        const fullName = `${next.firstName} ${next.lastName}`.trim();
+        const res = await updateUserProfile(currentToken, {
+          name: fullName || undefined,
+          phoneNumber: next.contactNumber || null,
+          whatsappNumber: next.whatsappNumber || null,
+        });
+
+        if (!res.ok || !res.data?.success) {
+          return {
+            success: false,
+            error: res.data?.message || 'Failed to update profile on server',
+          };
+        }
+
+        if (res.data?.data) {
+          const u = res.data.data;
+          setUser((prev) => (prev ? { ...prev, name: u.name, phoneNumber: u.phoneNumber } : prev));
+        }
+      } catch (err: any) {
+        return { success: false, error: err.message || 'Network error updating profile' };
+      } finally {
+        setIsSaving(false);
+      }
+    }
+
+    return { success: true };
+  };
+
+  // Add address to local state and persist to database user table
+  const addAddress = async (
+    addr: Omit<Address, 'id' | 'isDefault'>
+  ): Promise<{ success: boolean; error?: string }> => {
     const newId = `addr-${Date.now()}`;
     const newAddr: Address = {
       ...addr,
       id: newId,
       isDefault: addresses.length === 0,
     };
-    setAddresses((prev) => [newAddr, ...prev]);
+    const nextAddresses = [newAddr, ...addresses];
+    setAddresses(nextAddresses);
     setSelectedAddressId(newId);
+
+    const currentToken =
+      token || (typeof window !== 'undefined' ? localStorage.getItem('stylefox_token') : null);
+
+    if (currentToken) {
+      setIsSaving(true);
+      try {
+        const res = await addUserAddress(currentToken, {
+          address: {
+            id: newId,
+            tag: newAddr.tag,
+            name: newAddr.name,
+            phone: newAddr.phone,
+            street: newAddr.street,
+            city: newAddr.city,
+            state: newAddr.state,
+            pincode: newAddr.pincode,
+            isDefault: true,
+          },
+          ActiveAddress: true,
+        });
+
+        if (res.ok && res.data?.success && res.data?.data) {
+          if (Array.isArray(res.data.data.address)) {
+            const fresh = parseBackendAddresses(res.data.data.address);
+            setAddresses(fresh);
+            const active = fresh.find((a) => a.isDefault) || fresh[0];
+            if (active) setSelectedAddressId(active.id);
+          }
+        }
+      } catch (err: any) {
+        console.warn('[ProfileContext] Error adding address to backend:', err);
+      } finally {
+        setIsSaving(false);
+      }
+    }
+
+    return { success: true };
   };
 
-  const deleteAddress = (id: string) => {
-    setAddresses((prev) => prev.filter((a) => a.id !== id));
+  // Delete address from local state and remove from database user table
+  const deleteAddress = async (
+    id: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const index = addresses.findIndex((a) => a.id === id);
+    const remaining = addresses.filter((a) => a.id !== id);
+    setAddresses(remaining);
     if (selectedAddressId === id) {
-      const remaining = addresses.filter((a) => a.id !== id);
       if (remaining.length > 0) {
         setSelectedAddressId(remaining[0].id);
       }
+    }
+
+    const currentToken =
+      token || (typeof window !== 'undefined' ? localStorage.getItem('stylefox_token') : null);
+
+    if (currentToken && index >= 0) {
+      setIsSaving(true);
+      try {
+        const res = await deleteUserAddress(currentToken, index);
+        if (res.ok && res.data?.success && res.data?.data) {
+          if (Array.isArray(res.data.data.address)) {
+            const fresh = parseBackendAddresses(res.data.data.address);
+            setAddresses(fresh);
+            const active = fresh.find((a) => a.isDefault) || fresh[0];
+            if (active) setSelectedAddressId(active.id);
+          }
+        }
+      } catch (err: any) {
+        console.warn('[ProfileContext] Error deleting address from backend:', err);
+      } finally {
+        setIsSaving(false);
+      }
+    }
+
+    return { success: true };
+  };
+
+  const handleSetSelectedAddressId = (id: string) => {
+    setSelectedAddressId(id);
+    const index = addresses.findIndex((a) => a.id === id);
+    const currentToken =
+      token || (typeof window !== 'undefined' ? localStorage.getItem('stylefox_token') : null);
+    if (currentToken && index >= 0) {
+      setActiveUserAddress(currentToken, index).catch((err) => {
+        console.warn('[ProfileContext] Error setting active address:', err);
+      });
     }
   };
 
@@ -234,13 +630,24 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   return (
     <ProfileContext.Provider
       value={{
+        isAuthenticated,
+        user,
+        token,
+        isAuthModalOpen,
+        setIsAuthModalOpen,
+        authModalMode,
+        setAuthModalMode,
+        openProfileOrAuth,
+        login,
+        register,
+        logout,
         isProfileOpen,
         setIsProfileOpen,
         profile,
         updateProfile,
         addresses,
         selectedAddressId,
-        setSelectedAddressId,
+        setSelectedAddressId: handleSetSelectedAddressId,
         addAddress,
         deleteAddress,
         shippingAddresses,
@@ -248,6 +655,16 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
         setSelectedShippingAddressId,
         addShippingAddress,
         deleteShippingAddress,
+        isSaving,
+        authModalPrompt,
+        setAuthModalPrompt,
+        profileDrawerNotice,
+        setProfileDrawerNotice,
+        profileDrawerInitialTab,
+        setProfileDrawerInitialTab,
+        hasWhatsappNumber,
+        hasDeliveryAddress,
+        requireWhatsAppPrerequisites,
       }}
     >
       {children}

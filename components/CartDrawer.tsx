@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Image from 'next/image';
-import { X, Plus, Minus, Trash2, ShoppingBag, ShieldCheck, Sparkles, MessageCircle } from 'lucide-react';
+import { X, Plus, Minus, Trash2, ShoppingBag, ShieldCheck, Sparkles, MessageCircle, AlertCircle } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 import { useProfile } from '@/context/ProfileContext';
 import { createWhatsAppOrderUrl } from '@/utils/whatsapp';
@@ -21,7 +21,18 @@ export default function CartDrawer() {
     totalCount,
   } = useCart();
 
-  const { profile, addresses, selectedAddressId } = useProfile();
+  const {
+    profile,
+    addresses,
+    selectedAddressId,
+    isAuthenticated,
+    hasWhatsappNumber,
+    hasDeliveryAddress,
+    requireWhatsAppPrerequisites,
+    setProfileDrawerNotice,
+    setProfileDrawerInitialTab,
+    setIsProfileOpen,
+  } = useProfile();
 
   if (!isCartOpen) return null;
 
@@ -43,6 +54,7 @@ export default function CartDrawer() {
       firstName: profile.firstName,
       lastName: profile.lastName,
       contactNumber: profile.contactNumber,
+      whatsappNumber: profile.whatsappNumber || profile.contactNumber,
       email: profile.email,
     },
     address: selectedAddress
@@ -57,6 +69,16 @@ export default function CartDrawer() {
         }
       : undefined,
   });
+
+  const handleCheckoutWhatsApp = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!requireWhatsAppPrerequisites({ actionDescription: 'checkout your order via WhatsApp' })) {
+      return;
+    }
+    if (typeof window !== 'undefined') {
+      window.open(whatsappCartUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
 
   const freeShippingThreshold = 2000;
   const progressToFreeShipping = Math.min(100, Math.round((subtotal / freeShippingThreshold) * 100));
@@ -234,15 +256,82 @@ export default function CartDrawer() {
                 </div>
               </div>
 
-              <a
-                href={whatsappCartUrl}
-                target="_blank"
-                rel="noopener noreferrer"
+              {/* WhatsApp Prerequisites Validation Status */}
+              {!isAuthenticated ? (
+                <div className="p-3 bg-zinc-900 border border-amber-500/40 rounded-xl flex items-center justify-between gap-3 text-xs animate-in fade-in">
+                  <div className="flex items-center gap-2 text-amber-300">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+                    <span className="text-[11px] leading-tight">Sign in or register required to checkout on WhatsApp</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => requireWhatsAppPrerequisites({ actionDescription: 'checkout your order via WhatsApp' })}
+                    className="px-2.5 py-1 bg-[#fef08a] text-black font-extrabold text-[10px] uppercase rounded tracking-wider shrink-0 cursor-pointer hover:bg-yellow-300 transition-colors"
+                  >
+                    Sign In / Sign Up
+                  </button>
+                </div>
+              ) : !hasDeliveryAddress || !hasWhatsappNumber ? (
+                <div className="p-3 bg-zinc-900 border border-amber-500/40 rounded-xl flex items-center justify-between gap-3 text-xs animate-in fade-in">
+                  <div className="flex items-center gap-2 text-amber-300">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+                    <span className="text-[11px] leading-tight">
+                      {!hasDeliveryAddress && !hasWhatsappNumber
+                        ? 'Address & WhatsApp number required before checkout'
+                        : !hasDeliveryAddress
+                        ? 'Delivery address required to complete order'
+                        : 'WhatsApp contact number required'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfileDrawerInitialTab(!hasDeliveryAddress ? 'addresses' : 'details');
+                      setProfileDrawerNotice(
+                        !hasDeliveryAddress && !hasWhatsappNumber
+                          ? 'Please add your WhatsApp number and delivery address to checkout.'
+                          : !hasDeliveryAddress
+                          ? 'Please add your delivery address to checkout.'
+                          : 'Please add your WhatsApp contact number to checkout.'
+                      );
+                      setIsProfileOpen(true);
+                    }}
+                    className="px-2.5 py-1 bg-[#fef08a] text-black font-extrabold text-[10px] uppercase rounded tracking-wider shrink-0 cursor-pointer hover:bg-yellow-300 transition-colors"
+                  >
+                    {!hasDeliveryAddress ? 'Add Address' : 'Add WhatsApp'}
+                  </button>
+                </div>
+              ) : (
+                <div className="px-3 py-2 bg-emerald-950/40 border border-emerald-500/30 rounded-lg flex items-center justify-between text-[11px] text-zinc-300">
+                  <div className="flex items-center gap-1.5 truncate">
+                    <span className="text-emerald-400 font-bold flex items-center gap-1 shrink-0">
+                      ✓ Ship To:
+                    </span>
+                    <span className="text-white truncate">
+                      {selectedAddress?.street}, {selectedAddress?.city}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfileDrawerInitialTab('addresses');
+                      setIsProfileOpen(true);
+                    }}
+                    className="text-[#fef08a] hover:underline text-[10px] uppercase font-bold shrink-0 ml-2 cursor-pointer"
+                  >
+                    Change
+                  </button>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleCheckoutWhatsApp}
                 className="w-full py-4 bg-[#25D366] hover:bg-[#1ebd59] text-black font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg hover:shadow-green-500/20 active:scale-[0.99] rounded text-center"
               >
                 <MessageCircle className="w-4 h-4 fill-black" />
                 <span>Checkout WhatsApp • ₹ {grandTotal.toLocaleString()}</span>
-              </a>
+              </button>
 
               <div className="flex items-center justify-center gap-2 text-[11px] text-zinc-500 pt-1">
                 <ShieldCheck className="w-3.5 h-3.5 text-zinc-400" />

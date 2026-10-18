@@ -11,7 +11,7 @@ const emptySubscribe = () => () => {};
 
 export default function Header() {
   const { totalCount, setIsCartOpen } = useCart();
-  const { setIsProfileOpen, profile } = useProfile();
+  const { openProfileOrAuth, profile, isAuthenticated } = useProfile();
   const isMounted = useSyncExternalStore(
     emptySubscribe,
     () => true,
@@ -23,18 +23,28 @@ export default function Header() {
       {/* Left side: Profile */}
       <div className="flex items-center w-1/3">
         <button
-          onClick={() => setIsProfileOpen(true)}
+          onClick={openProfileOrAuth}
           className="p-1.5 sm:p-2 hover:bg-zinc-800 rounded-md transition-colors flex items-center gap-2 group cursor-pointer"
-          aria-label="User Account"
+          aria-label={isMounted && isAuthenticated ? "User Account" : "Sign In / Register"}
         >
           <div className="relative">
-            <User className="w-5 sm:w-6 h-5 sm:h-6 text-white group-hover:text-[#fef08a] transition-colors" />
+            <User
+              className={`w-5 sm:w-6 h-5 sm:h-6 transition-colors ${
+                isMounted && isAuthenticated
+                  ? 'text-[#fef08a]'
+                  : 'text-white group-hover:text-[#fef08a]'
+              }`}
+            />
           </div>
-          {isMounted && profile.firstName && (
+          {isMounted && isAuthenticated && profile.firstName ? (
             <span className="hidden sm:inline-block text-xs font-bold uppercase text-zinc-300 group-hover:text-white transition-colors">
               {profile.firstName}
             </span>
-          )}
+          ) : isMounted && !isAuthenticated ? (
+            <span className="hidden sm:inline-block text-xs font-bold uppercase tracking-wider text-zinc-400 group-hover:text-[#fef08a] transition-colors">
+              Sign In
+            </span>
+          ) : null}
         </button>
       </div>
       

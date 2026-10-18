@@ -1,8 +1,7 @@
 import TopBanner from "@/components/TopBanner";
 import Header from "@/components/Header";
 import Hero from "@/components/Hero";
-import FilterBar from "@/components/FilterBar";
-import ProductGrid from "@/components/ProductGrid";
+import ProductCatalog from "@/components/ProductCatalog";
 import FloatingIcons from "@/components/FloatingIcons";
 import Loader from "@/components/Loader";
 import Footer from "@/components/Footer";
@@ -17,9 +16,7 @@ export default async function Home() {
       <TopBanner />
       <Header />
       <Hero />
-      {/* <CategoryNav /> */}
-      <FilterBar />
-      <ProductGrid initialProducts={products} />
+      <ProductCatalog initialProducts={products} />
       <Footer />
       <FloatingIcons />
     </div>

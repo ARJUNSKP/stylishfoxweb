@@ -2,28 +2,71 @@
 import React, { useState } from 'react';
 import { SlidersHorizontal, ChevronDown, X } from 'lucide-react';
 
-export default function FilterBar() {
+interface FilterBarProps {
+  selectedFilter?: string | null;
+  onSelectFilter?: (opt: string | null) => void;
+  selectedSort?: string;
+  onSelectSort?: (opt: string) => void;
+  searchQuery?: string;
+  onClearSearch?: () => void;
+}
+
+export default function FilterBar({
+  selectedFilter: controlledFilter,
+  onSelectFilter,
+  selectedSort: controlledSort,
+  onSelectSort,
+  searchQuery,
+  onClearSearch,
+}: FilterBarProps = {}) {
   const [isOpen, setIsOpen] = useState(false);
   const [isSortOpen, setIsSortOpen] = useState(false);
-  const [selectedFilter, setSelectedFilter] = useState<string | null>(null);
-  const [selectedSort, setSelectedSort] = useState("POPULARITY");
-  
-  const filterOptions = ["T-Shirt", "Shirt", "Custom T-Shirt", "Ladies Top"];
+  const [internalFilter, setInternalFilter] = useState<string | null>(null);
+  const [internalSort, setInternalSort] = useState("POPULARITY");
+
+  const selectedFilter = controlledFilter !== undefined ? controlledFilter : internalFilter;
+  const selectedSort = controlledSort !== undefined ? controlledSort : internalSort;
+
+  const filterOptions = [
+    "All",
+    "Men's Collection",
+    "Women's Collection",
+    "Footwear & Sneakers",
+    "Accessories",
+    "T-Shirt",
+    "Shirt",
+    "Hoodie",
+    "Jacket",
+    "Pants & Cargo",
+  ];
   const sortOptions = ["POPULARITY", "ASCENDING (A-Z)", "DESCENDING (Z-A)", "PRICE: LOW TO HIGH", "PRICE: HIGH TO LOW"];
 
   const handleSelect = (opt: string) => {
-    setSelectedFilter(opt);
-    setIsOpen(false); // Close filter dropdown
+    const val = opt === "All" ? null : opt;
+    if (onSelectFilter) {
+      onSelectFilter(val);
+    } else {
+      setInternalFilter(val);
+    }
+    setIsOpen(false);
   };
 
   const handleSortSelect = (opt: string) => {
-    setSelectedSort(opt);
-    setIsSortOpen(false); // Close sort dropdown
+    if (onSelectSort) {
+      onSelectSort(opt);
+    } else {
+      setInternalSort(opt);
+    }
+    setIsSortOpen(false);
   };
 
   const clearFilter = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setSelectedFilter(null);
+    if (onSelectFilter) {
+      onSelectFilter(null);
+    } else {
+      setInternalFilter(null);
+    }
   };
 
   return (
@@ -50,6 +93,19 @@ export default function FilterBar() {
               <button onClick={clearFilter} className="hover:text-white transition-colors" aria-label="Clear filter">
                 <X className="w-3 h-3" />
               </button>
+            </div>
+          )}
+
+          {/* Active Search Pill */}
+          {searchQuery && (
+            <div className="flex items-center gap-2 bg-gray-900 px-3 py-1 rounded-full border border-gray-700 text-xs">
+              <span className="text-zinc-400">Search:</span>
+              <span className="text-[#fef08a] font-semibold">&ldquo;{searchQuery}&rdquo;</span>
+              {onClearSearch && (
+                <button onClick={onClearSearch} className="hover:text-white transition-colors" aria-label="Clear search">
+                  <X className="w-3 h-3" />
+                </button>
+              )}
             </div>
           )}
         </div>
