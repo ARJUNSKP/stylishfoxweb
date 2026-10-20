@@ -76,14 +76,6 @@ export default function ProductDetailClient({
       ? product.colors[selectedColorIndex] || product.colors[0]
       : fallbackColor;
 
-  const activeImages =
-    activeColor.images && activeColor.images.length > 0
-      ? activeColor.images
-      : fallbackImages;
-
-  // State for active image index in current color's gallery
-  const [activeImageIndex, setActiveImageIndex] = useState(0);
-
   // State for size selection
   const availableSizes =
     product.sizes && product.sizes.length > 0
@@ -99,30 +91,83 @@ export default function ProductDetailClient({
   // Added to cart feedback state
   const [isAdded, setIsAdded] = useState(false);
 
-  // Handle color variation switch (also resets main preview image to first thumbnail of new color)
+  // Filter only published variants for storefront interaction
+  const publishedVariants = useMemo(() => {
+    if (!product.variants || !Array.isArray(product.variants)) return [];
+    return product.variants.filter((v: any) => v.isPublished !== false);
+  }, [product.variants]);
+
+  // Find exact matching variant for selected color and size
+  const currentVariant = useMemo(() => {
+    if (publishedVariants.length === 0) return null;
+    const curColor = (activeColor.name || '').toLowerCase().trim();
+    const curSize = (selectedSize || '').toLowerCase().trim();
+
+    // 1. Try exact match on both color and size
+    const exact = publishedVariants.find((v: any) => {
+      const vColor = (v.color?.name || v.colorName || '').toLowerCase().trim();
+      const vSize = (v.size?.code || v.size?.name || v.sizeCode || '').toLowerCase().trim();
+      const colorMatches = !vColor || vColor === 'standard' || vColor === curColor;
+      const sizeMatches = !vSize || vSize === 'free size' || vSize === curSize;
+      return colorMatches && sizeMatches;
+    });
+    if (exact) return exact;
+
+    // 2. Try match on color first
+    const colorMatch = publishedVariants.find((v: any) => {
+      const vColor = (v.color?.name || v.colorName || '').toLowerCase().trim();
+      return vColor && vColor === curColor;
+    });
+    if (colorMatch) return colorMatch;
+
+    return publishedVariants[0] || null;
+  }, [publishedVariants, activeColor.name, selectedSize]);
+
+  // Gallery images: prefer variant-level images if available, else active color images, else fallback
+  const activeImages: string[] = useMemo<string[]>(() => {
+    if (currentVariant?.images && Array.isArray(currentVariant.images) && currentVariant.images.length > 0) {
+      return currentVariant.images as string[];
+    }
+    if (activeColor.images && Array.isArray(activeColor.images) && activeColor.images.length > 0) {
+      return activeColor.images as string[];
+    }
+    return fallbackImages;
+  }, [currentVariant?.images, activeColor.images, fallbackImages]);
+
+  // State for active image index in current color's gallery
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
+
+  // Handle color variation switch (also auto-syncs available size for the newly active color)
   const handleColorChange = (index: number) => {
     setSelectedColorIndex(index);
     setActiveImageIndex(0);
+
+    const targetColor = product.colors[index];
+    if (targetColor && publishedVariants.length > 0) {
+      const colorVariants = publishedVariants.filter((v: any) => {
+        const vColor = (v.color?.name || v.colorName || '').toLowerCase().trim();
+        return !vColor || vColor === 'standard' || vColor === targetColor.name.toLowerCase().trim();
+      });
+
+      if (colorVariants.length > 0) {
+        const hasCurrentSize = colorVariants.some((v: any) => {
+          const vSize = (v.size?.code || v.size?.name || v.sizeCode || '').toLowerCase().trim();
+          return vSize === selectedSize.toLowerCase().trim();
+        });
+
+        if (!hasCurrentSize) {
+          const firstSize = colorVariants[0].size?.code || colorVariants[0].size?.name || colorVariants[0].sizeCode;
+          if (firstSize) {
+            setSelectedSize(firstSize);
+          }
+        }
+      }
+    }
   };
 
   const handleQuantityChange = (delta: number) => {
     setQuantity((prev) => Math.max(1, Math.min(10, prev + delta)));
   };
-
-  // Find exact matching variant for selected color and size
-  const currentVariant = useMemo(() => {
-    if (!product.variants || product.variants.length === 0) return null;
-    return (
-      product.variants.find((v: any) => {
-        const vColorName = (v.color?.name || '').toLowerCase();
-        const vSize = (v.size?.code || v.size?.name || '').toLowerCase();
-        const matchColor =
-          !vColorName || vColorName === activeColor.name.toLowerCase();
-        const matchSize = !vSize || vSize === selectedSize.toLowerCase();
-        return matchColor && matchSize;
-      }) || null
-    );
-  }, [product.variants, activeColor.name, selectedSize]);
 
   // Determine if currently selected combination is out of stock
   const currentStock = useMemo(() => {
@@ -141,17 +186,17 @@ export default function ProductDetailClient({
 
   // Check if a specific size is out of stock for the active color
   const isSizeOutOfStock = (sizeToCheck: string) => {
-    if (!product.variants || product.variants.length === 0) {
+    if (publishedVariants.length === 0) {
       return product.stock !== undefined ? product.stock <= 0 : false;
     }
-    const variantForSize = product.variants.find((v: any) => {
-      const vColorName = (v.color?.name || '').toLowerCase();
-      const vSize = (v.size?.code || v.size?.name || '').toLowerCase();
+    const variantForSize = publishedVariants.find((v: any) => {
+      const vColorName = (v.color?.name || v.colorName || '').toLowerCase().trim();
+      const vSize = (v.size?.code || v.size?.name || v.sizeCode || '').toLowerCase().trim();
       const matchColor =
-        !vColorName || vColorName === activeColor.name.toLowerCase();
-      return matchColor && vSize === sizeToCheck.toLowerCase();
+        !vColorName || vColorName === 'standard' || vColorName === activeColor.name.toLowerCase().trim();
+      return matchColor && vSize === sizeToCheck.toLowerCase().trim();
     });
-    if (!variantForSize) return false;
+    if (!variantForSize) return true;
     const st =
       typeof variantForSize.stock === 'number'
         ? variantForSize.stock
@@ -159,13 +204,59 @@ export default function ProductDetailClient({
     return st <= 0;
   };
 
-  // Auto calculate amount
-  const itemTotalAmount = product.price * quantity;
-  const originalTotalAmount = product.originalPrice * quantity;
-  const savings = originalTotalAmount - itemTotalAmount;
-  const discountPercent = Math.round(
-    ((product.originalPrice - product.price) / product.originalPrice) * 100
-  );
+  // Dynamic Pricing: Variant-based prices for the selected color & size
+  const { activeUnitPrice, strikeUnitPrice, discountPercent, hasSellingPrice } = useMemo(() => {
+    let regularPrice = product.price || 0;
+    let salePrice: number | undefined = product.sellingPrice;
+
+    if (currentVariant) {
+      const vRegular = parseFloat(currentVariant.price);
+      if (!isNaN(vRegular) && vRegular > 0) {
+        regularPrice = vRegular;
+      }
+
+      const rawSelling = currentVariant.sellingPrice ?? currentVariant.selling_price;
+      if (rawSelling !== undefined && rawSelling !== null) {
+        const vSale = parseFloat(rawSelling);
+        if (!isNaN(vSale) && vSale > 0) {
+          salePrice = vSale;
+        } else {
+          salePrice = undefined;
+        }
+      }
+    }
+
+    const hasDiscount = Boolean(
+      salePrice !== undefined &&
+      salePrice !== null &&
+      regularPrice > 0 &&
+      salePrice < regularPrice
+    );
+
+    const unitPrice = hasDiscount ? salePrice! : regularPrice;
+    const strikePrice = hasDiscount
+      ? regularPrice
+      : product.originalPrice && product.originalPrice > regularPrice
+      ? product.originalPrice
+      : undefined;
+
+    const discountPct = hasDiscount
+      ? Math.round(((regularPrice - salePrice!) / regularPrice) * 100)
+      : strikePrice && strikePrice > unitPrice
+      ? Math.round(((strikePrice - unitPrice) / strikePrice) * 100)
+      : 0;
+
+    return {
+      activeUnitPrice: unitPrice,
+      strikeUnitPrice: strikePrice,
+      discountPercent: discountPct,
+      hasSellingPrice: hasDiscount,
+    };
+  }, [currentVariant, product.price, product.sellingPrice, product.originalPrice]);
+
+  const itemTotalAmount = activeUnitPrice * quantity;
+  const originalTotalAmount = (strikeUnitPrice || activeUnitPrice) * quantity;
+  const savings = Math.max(0, originalTotalAmount - itemTotalAmount);
 
   const handleRebookWhatsApp = () => {
     if (!requireWhatsAppPrerequisites({ actionDescription: 'send an out-of-stock rebook enquiry via WhatsApp' })) {
@@ -175,7 +266,7 @@ export default function ProductDetailClient({
       productName: product.name,
       color: activeColor.name,
       size: selectedSize,
-      price: product.price,
+      price: activeUnitPrice,
       productId: product.id,
       customer: {
         firstName: profile.firstName,
@@ -195,7 +286,7 @@ export default function ProductDetailClient({
     addToCart({
       productId: product.id,
       name: product.name,
-      price: product.price,
+      price: activeUnitPrice,
       image: activeImages[activeImageIndex] || activeImages[0],
       color: activeColor.name,
       size: selectedSize,
@@ -220,7 +311,7 @@ export default function ProductDetailClient({
           color: activeColor.name,
           size: selectedSize,
           quantity,
-          price: product.price,
+          price: activeUnitPrice,
         },
       ],
       subtotal: itemTotalAmount,
@@ -347,10 +438,7 @@ export default function ProductDetailClient({
                 {activeColor.name} • View {activeImageIndex + 1} of {activeImages.length}
               </span>
               {isOutOfStock ? (
-                <span className="bg-red-950/90 backdrop-blur-md text-[11px] font-black text-red-400 px-3 py-1 rounded border border-red-800/60 uppercase tracking-wider flex items-center gap-1.5 shadow-lg">
-                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" />
-                  Out of Stock
-                </span>
+               ""
               ) : (
                 <span className="bg-emerald-950/80 backdrop-blur-md text-[11px] font-bold text-emerald-400 px-3 py-1 rounded border border-emerald-800/40">
                   In Stock
@@ -368,12 +456,6 @@ export default function ProductDetailClient({
               <span className="text-[11px] sm:text-xs uppercase font-extrabold text-[#fef08a] tracking-widest">
                 Stylish Fox Signature
               </span>
-              {isOutOfStock && (
-                <span className="bg-red-600/95 backdrop-blur-md text-white text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded shadow flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                  OUT OF STOCK
-                </span>
-              )}
             </div>
 
             <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-white uppercase tracking-tight leading-tight mb-1 sm:mb-2">
@@ -384,19 +466,40 @@ export default function ProductDetailClient({
             </p>
 
             {/* Pricing Section */}
-            <div className="flex flex-wrap items-baseline gap-2 sm:gap-3 pb-4 sm:pb-5 border-b border-zinc-800">
-              <span className="text-xl sm:text-2xl lg:text-3xl font-black text-white">
-                ₹ {product.price.toLocaleString()}
-              </span>
-              <span className="text-sm sm:text-base text-zinc-500 line-through">
-                ₹ {product.originalPrice.toLocaleString()}
-              </span>
-              <span className="bg-[#fef08a]/10 border border-[#fef08a]/30 text-[#fef08a] text-[10px] sm:text-xs font-black uppercase px-2 sm:px-2.5 py-0.5 rounded">
-                Save {discountPercent}%
-              </span>
-              <span className="text-[11px] sm:text-xs text-zinc-400 ml-auto font-medium">
-                (Inclusive of all taxes)
-              </span>
+            <div className="pb-4 sm:pb-5 border-b border-zinc-800">
+              <div className="flex flex-wrap items-baseline gap-2 sm:gap-3">
+                <span className="text-xl sm:text-2xl lg:text-3xl font-black text-white transition-all duration-200">
+                  ₹ {activeUnitPrice.toLocaleString()}
+                </span>
+                {strikeUnitPrice && strikeUnitPrice > activeUnitPrice && (
+                  <span className="text-sm sm:text-base text-zinc-500 line-through transition-all duration-200">
+                    ₹ {strikeUnitPrice.toLocaleString()}
+                  </span>
+                )}
+                {discountPercent > 0 && (
+                  <span className="bg-[#fef08a]/10 border border-[#fef08a]/30 text-[#fef08a] text-[10px] sm:text-xs font-black uppercase px-2 sm:px-2.5 py-0.5 rounded transition-all duration-200">
+                    {discountPercent}% OFF
+                  </span>
+                )}
+                <span className="text-[11px] sm:text-xs text-zinc-400 ml-auto font-medium">
+                  (Inclusive of all taxes)
+                </span>
+              </div>
+
+              {/* Dynamic Variant Spec & SKU Indicator */}
+              {currentVariant && (
+                <div className="flex items-center gap-2 mt-2 flex-wrap">
+                  <span className="text-[11px] text-zinc-400">
+                    Selected: <strong className="text-white">{activeColor.name}</strong> • Size{' '}
+                    <strong className="text-white">{selectedSize}</strong>
+                  </span>
+                  {currentVariant.sku && (
+                    <span className="text-[10px] font-mono text-zinc-400 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">
+                      SKU: {currentVariant.sku}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -451,6 +554,29 @@ export default function ProductDetailClient({
                 const isSelected = size === selectedSize;
                 const sizeOutOfStock = isSizeOutOfStock(size);
 
+                // Find variant for this size under active color to show size-specific price
+                const sizeVariant = publishedVariants.find((v: any) => {
+                  const vColor = (v.color?.name || v.colorName || '').toLowerCase().trim();
+                  const vSize = (v.size?.code || v.size?.name || v.sizeCode || '').toLowerCase().trim();
+                  const curColor = (activeColor.name || '').toLowerCase().trim();
+                  const matchColor = !vColor || vColor === 'standard' || vColor === curColor;
+                  return matchColor && vSize === size.toLowerCase().trim();
+                });
+
+                const rawSelling = sizeVariant?.sellingPrice ?? sizeVariant?.selling_price;
+                const sizeSelling =
+                  rawSelling !== undefined && rawSelling !== null && !isNaN(parseFloat(rawSelling))
+                    ? parseFloat(rawSelling)
+                    : undefined;
+                const sizeRegular =
+                  sizeVariant?.price !== undefined && !isNaN(parseFloat(sizeVariant.price))
+                    ? parseFloat(sizeVariant.price)
+                    : undefined;
+                const sizeEffectivePrice =
+                  sizeSelling && sizeRegular && sizeSelling < sizeRegular
+                    ? sizeSelling
+                    : sizeSelling || sizeRegular;
+
                 return (
                   <button
                     key={size}
@@ -467,11 +593,19 @@ export default function ProductDetailClient({
                     }`}
                   >
                     <span>{size}</span>
-                    {sizeOutOfStock && (
+                    {sizeOutOfStock ? (
                       <span className="text-[8px] font-bold text-red-400 mt-0.5 tracking-tight leading-none">
                         Out of stock
                       </span>
-                    )}
+                    ) : sizeEffectivePrice && sizeEffectivePrice > 0 ? (
+                      <span
+                        className={`text-[8px] font-mono mt-0.5 leading-none ${
+                          isSelected ? 'text-black/80 font-bold' : 'text-zinc-400'
+                        }`}
+                      >
+                        ₹{sizeEffectivePrice.toLocaleString()}
+                      </span>
+                    ) : null}
                   </button>
                 );
               })}
@@ -485,10 +619,7 @@ export default function ProductDetailClient({
                 Quantity
               </span>
               {isOutOfStock ? (
-                <span className="text-[10px] sm:text-[11px] text-red-400 font-bold flex items-center gap-1.5 bg-red-950/50 border border-red-800/50 px-2 py-0.5 rounded">
-                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                  OUT OF STOCK • Rebook Available
-                </span>
+                ""
               ) : (
                 <span className="text-[10px] sm:text-[11px] text-emerald-400 font-semibold">
                   ✓ Ready for immediate dispatch
@@ -736,15 +867,35 @@ export default function ProductDetailClient({
                 <h4 className="text-xs font-bold uppercase text-white line-clamp-1 group-hover:text-[#fef08a] transition-colors">
                   {relProduct.name}
                 </h4>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="text-xs font-bold text-white">
-                    ₹ {relProduct.price ? relProduct.price.toLocaleString() : '0'}
-                  </span>
-                  {relProduct.originalPrice ? (
-                    <span className="text-[11px] text-zinc-500 line-through">
-                      ₹ {relProduct.originalPrice.toLocaleString()}
-                    </span>
-                  ) : null}
+                <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                  {relProduct.sellingPrice &&
+                  relProduct.price &&
+                  relProduct.sellingPrice < relProduct.price ? (
+                    <>
+                      <span className="text-xs font-bold text-white">
+                        ₹ {relProduct.sellingPrice.toLocaleString()}
+                      </span>
+                      <span className="text-[11px] text-zinc-500 line-through">
+                        ₹ {relProduct.price ? relProduct.price.toLocaleString() : '0'}
+                      </span>
+                      <span className="text-[9px] font-black text-[#fef08a] bg-[#fef08a]/10 border border-[#fef08a]/30 px-1 py-0.2 rounded">
+                        {Math.round(
+                          ((relProduct.price - relProduct.sellingPrice) / relProduct.price) * 100
+                        )}% OFF
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-xs font-bold text-white">
+                        ₹ {relProduct.price ? relProduct.price.toLocaleString() : '0'}
+                      </span>
+                      {relProduct.originalPrice ? (
+                        <span className="text-[11px] text-zinc-500 line-through">
+                          ₹ {relProduct.originalPrice.toLocaleString()}
+                        </span>
+                      ) : null}
+                    </>
+                  )}
                 </div>
               </Link>
             );

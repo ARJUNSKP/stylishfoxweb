@@ -4,12 +4,21 @@ export interface ProductColor {
   images: string[];
 }
 
+export interface ProductCategory {
+  categoryId?: string;
+  categoryName?: string;
+  id?: string;
+  name?: string;
+  slug?: string;
+}
+
 export interface Product {
   id: number | string;
   slug?: string;
   name: string;
   tagline: string;
   price: number;
+  sellingPrice?: number;
   originalPrice: number;
   isNew?: boolean;
   rating: number;
@@ -20,7 +29,9 @@ export interface Product {
   sizes: string[];
   images?: string[];
   variants?: any[];
-  categoryId?: string | null;
+  categoryId?: string | ProductCategory | any | null;
+  category?: ProductCategory | null;
+  categoryName?: string | null;
   stock?: number;
   isOutOfStock?: boolean;
 }

@@ -9,6 +9,8 @@ import {
   addUserAddress,
   setActiveUserAddress,
   deleteUserAddress,
+  cacheUserProfile,
+  invalidateUserProfileCache,
 } from '@/utils/api';
 
 export interface Address {
@@ -87,6 +89,7 @@ interface ProfileContextType {
   hasWhatsappNumber: boolean;
   hasDeliveryAddress: boolean;
   requireWhatsAppPrerequisites: (options?: { actionDescription?: string }) => boolean;
+  isAdmin: boolean;
 }
 
 const emptyProfile: UserProfile = {
@@ -132,6 +135,8 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const [profileDrawerInitialTab, setProfileDrawerInitialTab] = useState<'details' | 'addresses'>('details');
   const [isSaving, setIsSaving] = useState(false);
   const isHydrated = useRef(false);
+  const hasSyncedInitialProfile = useRef(false);
+  const isSyncingProfile = useRef(false);
 
   // Profile data defaults to empty until user logs in or registers
   const [profile, setProfile] = useState<UserProfile>(emptyProfile);
@@ -143,6 +148,9 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   // Shipping Addresses
   const [shippingAddresses, setShippingAddresses] = useState<Address[]>([]);
   const [selectedShippingAddressId, setSelectedShippingAddressId] = useState<string>('');
+
+  // Admin Role Check
+  const isAdmin = Boolean(user && user.role && user.role.toLowerCase() === 'admin');
 
   // WhatsApp Checkout Prerequisites Checks
   const hasWhatsappNumber = Boolean(
@@ -204,10 +212,12 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     return true;
   };
 
-  // Sync fresh profile & addresses from Backend DB
-  const syncProfileFromBackend = async (jwtToken: string) => {
+  // Sync fresh profile & addresses from Backend DB with deduplication guard
+  const syncProfileFromBackend = async (jwtToken: string, forceFresh: boolean = false) => {
+    if (!jwtToken || isSyncingProfile.current) return;
+    isSyncingProfile.current = true;
     try {
-      const res = await fetchUserProfile(jwtToken);
+      const res = await fetchUserProfile(jwtToken, forceFresh);
       if (res.ok && res.data?.success && res.data?.data) {
         const u = res.data.data;
         const names = (u.name || '').trim().split(/\s+/);
@@ -240,6 +250,8 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (err) {
       console.warn('[ProfileContext] Error syncing profile from backend:', err);
+    } finally {
+      isSyncingProfile.current = false;
     }
   };
 
@@ -268,8 +280,11 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
             sameAsContact: true,
           });
         }
-        // Sync latest data from backend user table
-        syncProfileFromBackend(savedToken);
+        // Sync latest data from backend user table exactly once on initial mount
+        if (!hasSyncedInitialProfile.current) {
+          hasSyncedInitialProfile.current = true;
+          syncProfileFromBackend(savedToken);
+        }
       }
 
       const savedAddresses = localStorage.getItem('stylefox_addresses');
@@ -380,8 +395,9 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem('stylefox_profile', JSON.stringify(newProfile));
       } catch {}
 
-      // Fetch fresh profile & addresses from database user table
-      syncProfileFromBackend(jwtToken);
+      // Cache user profile from login response to eliminate redundant /users/profile fetch
+      cacheUserProfile(jwtToken, userData);
+      hasSyncedInitialProfile.current = true;
 
       // ONLY AFTER LOGIN: Open Profile Drawer so details are displayed!
       setIsProfileOpen(true);
@@ -425,8 +441,9 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem('stylefox_profile', JSON.stringify(newProfile));
       } catch {}
 
-      // Fetch fresh profile & addresses from database user table
-      syncProfileFromBackend(jwtToken);
+      // Cache user profile from register response to eliminate redundant /users/profile fetch
+      cacheUserProfile(jwtToken, userData);
+      hasSyncedInitialProfile.current = true;
 
       // ONLY AFTER REGISTER: Open Profile Drawer so details are displayed!
       setIsProfileOpen(true);
@@ -447,6 +464,8 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     setAddresses([]);
     setSelectedAddressId('');
     setIsProfileOpen(false);
+    hasSyncedInitialProfile.current = false;
+    invalidateUserProfileCache(token || undefined);
     try {
       localStorage.removeItem('stylefox_token');
       localStorage.removeItem('stylefox_user');
@@ -665,6 +684,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
         hasWhatsappNumber,
         hasDeliveryAddress,
         requireWhatsAppPrerequisites,
+        isAdmin,
       }}
     >
       {children}

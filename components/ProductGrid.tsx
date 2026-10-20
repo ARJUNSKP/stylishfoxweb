@@ -24,13 +24,14 @@ export default function ProductGrid({ initialProducts, products: controlledProdu
 
   useEffect(() => {
     if (controlledProducts !== undefined) return;
+    if (initialProducts && initialProducts.length > 0) return;
     // Refresh or fetch products from backend API when uncontrolled
     fetchProducts().then((data) => {
       if (data && data.length > 0) {
         setLocalProducts(data);
       }
     });
-  }, [controlledProducts]);
+  }, [controlledProducts, initialProducts]);
 
   const products = controlledProducts !== undefined ? controlledProducts : localProducts;
 
@@ -98,6 +99,14 @@ export default function ProductGrid({ initialProducts, products: controlledProdu
 
         const productHref = `/product/${product.id}`;
         const isOutOfStock = product.stock !== undefined && product.stock <= 0;
+        const hasDiscount = Boolean(
+          product.sellingPrice &&
+          product.price &&
+          product.sellingPrice < product.price
+        );
+        const discountPercent = hasDiscount
+          ? Math.round(((product.price - product.sellingPrice!) / product.price) * 100)
+          : 0;
 
         return (
           <Link
@@ -117,6 +126,10 @@ export default function ProductGrid({ initialProducts, products: controlledProdu
                 <div className="absolute top-2 left-2 z-10 bg-red-600/95 backdrop-blur-md text-white text-[10px] sm:text-[11px] font-black uppercase tracking-wider px-2 py-0.5 rounded shadow flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                   Out of Stock
+                </div>
+              ) : hasDiscount ? (
+                <div className="absolute top-2 left-2 z-10 bg-[#fef08a] text-black text-[10px] sm:text-[11px] font-black uppercase tracking-wider px-2 py-0.5 rounded shadow">
+                  {discountPercent}% OFF
                 </div>
               ) : product.isNew ? (
                 <div className="absolute top-2 left-2 z-10 bg-[#fef08a] text-black text-[11px] font-black uppercase tracking-wider px-2 py-0.5">
@@ -168,14 +181,30 @@ export default function ProductGrid({ initialProducts, products: controlledProdu
                   </h3>
                 </div>
 
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="font-bold text-sm text-white">
-                    ₹ {product.price ? product.price.toLocaleString() : '0'}
-                  </span>
-                  {product.originalPrice && (
-                    <span className="text-xs text-zinc-500 line-through">
-                      ₹ {product.originalPrice.toLocaleString()}
-                    </span>
+                <div className="flex flex-wrap items-center gap-2 mt-1">
+                  {hasDiscount ? (
+                    <>
+                      <span className="font-bold text-sm text-white">
+                        ₹ {product.sellingPrice!.toLocaleString()}
+                      </span>
+                      <span className="text-xs text-zinc-500 line-through">
+                        ₹ {product.price ? product.price.toLocaleString() : '0'}
+                      </span>
+                      <span className="text-[10px] font-black text-[#fef08a] bg-[#fef08a]/10 border border-[#fef08a]/30 px-1.5 py-0.2 rounded tracking-tight">
+                        {discountPercent}% OFF
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-bold text-sm text-white">
+                        ₹ {product.price ? product.price.toLocaleString() : '0'}
+                      </span>
+                      {product.originalPrice && product.originalPrice > product.price && (
+                        <span className="text-xs text-zinc-500 line-through">
+                          ₹ {product.originalPrice.toLocaleString()}
+                        </span>
+                      )}
+                    </>
                   )}
                   {isOutOfStock && (
                     <span className="text-[10px] text-red-400 font-bold uppercase tracking-wider">

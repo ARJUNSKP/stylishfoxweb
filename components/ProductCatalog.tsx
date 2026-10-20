@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { Search, X, Sparkles } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Search, X, Sparkles, Loader2, ArrowUp, CheckCircle2 } from 'lucide-react';
 import { Product, getAllProducts } from '@/data/products';
 import FilterBar from './FilterBar';
 import ProductGrid from './ProductGrid';
@@ -11,10 +11,21 @@ interface ProductCatalogProps {
   initialProducts?: Product[];
 }
 
+function getProductCategoryString(product: Product): string {
+  if (product.categoryName) return product.categoryName;
+  if (typeof product.categoryId === 'object' && product.categoryId !== null) {
+    return product.categoryId.categoryName || product.categoryId.name || product.categoryId.slug || '';
+  }
+  if (typeof product.category === 'object' && product.category !== null) {
+    return product.category.categoryName || product.category.name || product.category.slug || '';
+  }
+  return typeof product.categoryId === 'string' ? product.categoryId : '';
+}
+
 function matchesCategory(product: Product, category: string): boolean {
   if (!category || category === 'All') return true;
   const cat = category.toLowerCase();
-  const prodCat = (product.categoryId || '').toLowerCase();
+  const prodCat = getProductCategoryString(product).toLowerCase();
   const prodName = product.name.toLowerCase();
 
   if (cat.includes("men's") || cat === 'men') {
@@ -53,7 +64,7 @@ function matchesSearch(product: Product, query: string): boolean {
   const words = q.split(/\s+/);
   const name = product.name.toLowerCase();
   const desc = (product.description || '').toLowerCase();
-  const category = (product.categoryId || '').toLowerCase();
+  const category = getProductCategoryString(product).toLowerCase();
 
   return words.every(
     (word) => name.includes(word) || desc.includes(word) || category.includes(word)
@@ -62,11 +73,16 @@ function matchesSearch(product: Product, query: string): boolean {
 
 function sortProducts(items: Product[], sort: string): Product[] {
   const sorted = [...items];
+  const getEffectivePrice = (item: any) =>
+    item.sellingPrice && item.price && item.sellingPrice < item.price
+      ? item.sellingPrice
+      : item.price || 0;
+
   switch (sort) {
     case 'PRICE: LOW TO HIGH':
-      return sorted.sort((a, b) => (a.price || 0) - (b.price || 0));
+      return sorted.sort((a, b) => getEffectivePrice(a) - getEffectivePrice(b));
     case 'PRICE: HIGH TO LOW':
-      return sorted.sort((a, b) => (b.price || 0) - (a.price || 0));
+      return sorted.sort((a, b) => getEffectivePrice(b) - getEffectivePrice(a));
     case 'ASCENDING (A-Z)':
       return sorted.sort((a, b) => a.name.localeCompare(b.name));
     case 'DESCENDING (Z-A)':
@@ -85,14 +101,23 @@ export default function ProductCatalog({ initialProducts }: ProductCatalogProps)
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedSort, setSelectedSort] = useState('POPULARITY');
 
-  // Fetch updated catalog on mount
+  // Infinite Scroll State
+  const INITIAL_BATCH = 8;
+  const BATCH_SIZE = 8;
+  const [visibleCount, setVisibleCount] = useState(INITIAL_BATCH);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const observerTargetRef = useRef<HTMLDivElement | null>(null);
+
+  // Only fetch on client if initialProducts was not provided by SSR or is empty
   useEffect(() => {
-    fetchProducts().then((data) => {
+    if (initialProducts && initialProducts.length > 0) return;
+
+    fetchProducts({ limit: 100 }).then((data) => {
       if (data && data.length > 0) {
         setAllProducts(data);
       }
     });
-  }, []);
+  }, [initialProducts]);
 
   // Compute filtered & sorted products
   const displayedProducts = useMemo(() => {
@@ -108,6 +133,55 @@ export default function ProductCatalog({ initialProducts }: ProductCatalogProps)
 
     return sortProducts(result, selectedSort);
   }, [allProducts, searchQuery, selectedCategory, selectedSort]);
+
+  // Reset pagination count when search, category, or sort changes
+  useEffect(() => {
+    setVisibleCount(INITIAL_BATCH);
+    setIsLoadingMore(false);
+  }, [searchQuery, selectedCategory, selectedSort]);
+
+  const hasMore = visibleCount < displayedProducts.length;
+
+  const paginatedProducts = useMemo(() => {
+    return displayedProducts.slice(0, visibleCount);
+  }, [displayedProducts, visibleCount]);
+
+  const loadMore = useCallback(() => {
+    if (!hasMore || isLoadingMore) return;
+    setIsLoadingMore(true);
+    setTimeout(() => {
+      setVisibleCount((prev) => Math.min(prev + BATCH_SIZE, displayedProducts.length));
+      setIsLoadingMore(false);
+    }, 350);
+  }, [hasMore, isLoadingMore, displayedProducts.length]);
+
+  useEffect(() => {
+    const target = observerTargetRef.current;
+    if (!target || !hasMore) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !isLoadingMore) {
+          loadMore();
+        }
+      },
+      {
+        root: null,
+        rootMargin: '250px',
+        threshold: 0.05,
+      }
+    );
+
+    observer.observe(target);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [hasMore, isLoadingMore, loadMore]);
+
+  const handleScrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const handleClearAll = () => {
     setSearchQuery('');
@@ -201,7 +275,70 @@ export default function ProductCatalog({ initialProducts }: ProductCatalogProps)
 
       {/* Products Grid or Empty State */}
       {displayedProducts.length > 0 ? (
-        <ProductGrid products={displayedProducts} />
+        <>
+          <ProductGrid products={paginatedProducts} />
+
+          {/* Luxury Skeleton Cards while loading more */}
+          {isLoadingMore && (
+            <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4 px-2 sm:px-4 md:px-8 py-2 bg-black">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={`skeleton-${i}`} className="flex flex-col animate-pulse">
+                  <div className="relative aspect-[3/4] bg-zinc-900 border border-zinc-800/80 mb-3 overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-zinc-800/25 to-transparent -translate-x-full animate-[shimmer_1.5s_infinite]" />
+                  </div>
+                  <div className="h-3.5 bg-zinc-800 rounded w-3/4 mb-2" />
+                  <div className="h-3 bg-zinc-800/70 rounded w-1/3" />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Infinite Scroll Sentinel and Trigger Area */}
+          {hasMore && (
+            <div
+              ref={observerTargetRef}
+              className="w-full py-8 flex flex-col items-center justify-center min-h-[70px]"
+            >
+              {isLoadingMore ? (
+                <div className="flex items-center gap-2.5 px-5 py-2.5 rounded-full bg-zinc-900/90 border border-zinc-800 text-zinc-300 text-xs font-semibold tracking-wider uppercase shadow-xl backdrop-blur-md">
+                  <Loader2 className="w-4 h-4 text-[#fef08a] animate-spin" />
+                  <span>Loading more styles...</span>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={loadMore}
+                  className="text-xs uppercase tracking-widest text-zinc-500 hover:text-[#fef08a] font-semibold py-2 px-4 transition-colors cursor-pointer"
+                >
+                  Scroll down for more styles
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* End of Catalog State */}
+          {!hasMore && (
+            <div className="w-full py-12 px-4 flex flex-col items-center justify-center text-center border-t border-zinc-900/80 bg-gradient-to-b from-black to-zinc-950">
+              <div className="w-9 h-9 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-[#fef08a] mb-3 shadow-lg">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
+              <p className="text-xs font-bold uppercase tracking-widest text-zinc-300 mb-1">
+                All {displayedProducts.length} Styles Loaded
+              </p>
+              <p className="text-zinc-500 text-xs max-w-sm mb-4">
+                You have viewed our complete curated streetwear collection.
+              </p>
+              <button
+                type="button"
+                onClick={handleScrollToTop}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-[#fef08a]/50 text-xs font-bold text-zinc-300 hover:text-[#fef08a] transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-lg"
+              >
+                <ArrowUp className="w-3.5 h-3.5" />
+                <span>Back to Top</span>
+              </button>
+            </div>
+          )}
+        </>
       ) : (
         <div className="w-full py-20 px-4 text-center flex flex-col items-center justify-center bg-black">
           <div className="w-16 h-16 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center mb-4 text-[#fef08a]">
