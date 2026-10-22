@@ -6,6 +6,7 @@ import { X, Plus, Minus, Trash2, ShoppingBag, ShieldCheck, Sparkles, MessageCirc
 import { useCart } from '@/context/CartContext';
 import { useProfile } from '@/context/ProfileContext';
 import { createWhatsAppOrderUrl } from '@/utils/whatsapp';
+import { formatProductImageUrl } from '@/utils/api';
 
 export default function CartDrawer() {
   const {
@@ -160,10 +161,15 @@ export default function CartDrawer() {
                 >
                   <div className="relative w-20 h-24 bg-zinc-900 rounded overflow-hidden shrink-0">
                     <Image
-                      src={item.image}
+                      src={formatProductImageUrl(item.image)}
                       alt={item.name}
                       fill
+                      unoptimized
                       className="object-cover object-center"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).src =
+                          'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=400&q=80';
+                      }}
                     />
                   </div>
                   <div className="flex-1 flex flex-col justify-between">

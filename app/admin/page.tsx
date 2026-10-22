@@ -30,6 +30,9 @@ import {
   Archive,
   Lock,
   FileText,
+  UploadCloud,
+  Sliders,
+  ImageIcon,
 } from 'lucide-react';
 import { useProfile } from '@/context/ProfileContext';
 import InvoiceModal from '@/components/InvoiceModal';
@@ -49,7 +52,17 @@ import {
   addAdminVariant,
   updateAdminProduct,
   updateAdminVariant,
+  deleteAdminProductImage,
+  deleteAdminVariantImage,
+  deleteImageFromR2,
   setAdminVariantPublish,
+  formatProductImageUrl,
+  fetchCarousels,
+  createAdminCarousel,
+  activateAdminCarousel,
+  deleteAdminCarousel,
+  CarouselItem,
+  API_BASE_URL,
 } from '@/utils/api';
 import { Product } from '@/data/products';
 
@@ -86,6 +99,7 @@ interface StagedVariant {
   sellingPrice?: number;
   stock: number;
   images: string[];
+  imageFiles?: File[];
 }
 
 const emptySubscribe = () => () => {};
@@ -107,12 +121,35 @@ export default function AdminDashboardPage() {
   // Menu & Modal state
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const [activeModal, setActiveModal] = useState<'NONE' | 'ADD_PRODUCT' | 'EDIT_VARIANT' | 'CATEGORY' | 'COLORS' | 'SIZE' | 'INVOICE'>('NONE');
+  const [activeModal, setActiveModal] = useState<
+    'NONE' | 'ADD_PRODUCT' | 'EDIT_VARIANT' | 'CATEGORY' | 'COLORS' | 'SIZE' | 'CAROUSEL' | 'INVOICE'
+  >('NONE');
 
   // Backend metadata lists
   const [rawCategories, setRawCategories] = useState<{ id: string; name: string; slug: string; description?: string }[]>([]);
   const [rawColors, setRawColors] = useState<{ id: string; name: string; hexCode: string }[]>([]);
   const [rawSizes, setRawSizes] = useState<{ id: string; name: string; code: string; sortOrder?: number }[]>([]);
+  const [rawCarousels, setRawCarousels] = useState<CarouselItem[]>([]);
+
+  // Carousel form state & controls
+  const [carouselForm, setCarouselForm] = useState<{
+    title: string;
+    description: string;
+    isActive: boolean;
+    images: string[];
+    imageFiles: File[];
+  }>({
+    title: '',
+    description: '',
+    isActive: true,
+    images: [],
+    imageFiles: [],
+  });
+  const [isAddingNewCarousel, setIsAddingNewCarousel] = useState(false);
+  const [previewSlideIndex, setPreviewSlideIndex] = useState(0);
+  const [activatingCarouselId, setActivatingCarouselId] = useState<string | null>(null);
+  const [deletingCarouselId, setDeletingCarouselId] = useState<string | null>(null);
+  const carouselFileInputRef = useRef<HTMLInputElement>(null);
 
   // Submitting state & feedback message
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -121,6 +158,21 @@ export default function AdminDashboardPage() {
   const [deletingCategoryId, setDeletingCategoryId] = useState<string | null>(null);
   const [modalFeedback, setModalFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [stagedVariants, setStagedVariants] = useState<StagedVariant[]>([]);
+
+  // Cloudflare R2 image delete confirmation modal state
+  const [imageToDelete, setImageToDelete] = useState<{
+    url: string;
+    index: number;
+    type: 'productForm' | 'variantForm';
+    productId?: string;
+    variantId?: string;
+  } | null>(null);
+  const [isDeletingImage, setIsDeletingImage] = useState(false);
+
+  // Carousel delete confirmation modal state
+  const [carouselToDelete, setCarouselToDelete] = useState<CarouselItem | null>(null);
+  // Active carousel delete attempt warning modal state
+  const [activeCarouselWarning, setActiveCarouselWarning] = useState<CarouselItem | null>(null);
 
   // Forms
   const [productForm, setProductForm] = useState<{
@@ -140,6 +192,7 @@ export default function AdminDashboardPage() {
     sellingPrice: string;
     stock: string;
     images: string[];
+    imageFiles: File[];
     imageInput: string;
     isEditing: boolean;
   }>({
@@ -157,6 +210,7 @@ export default function AdminDashboardPage() {
     sellingPrice: '',
     stock: '',
     images: [],
+    imageFiles: [],
     imageInput: '',
     isEditing: false,
   });
@@ -176,6 +230,7 @@ export default function AdminDashboardPage() {
     stock: string;
     sku: string;
     images: string[];
+    imageFiles: File[];
     imageInput: string;
     isPublished: boolean;
   }>({
@@ -192,13 +247,13 @@ export default function AdminDashboardPage() {
     stock: '',
     sku: '',
     images: [],
+    imageFiles: [],
     imageInput: '',
     isPublished: true,
   });
 
   const [categoryForm, setCategoryForm] = useState({
     name: '',
-    slug: '',
     description: '',
   });
 
@@ -212,6 +267,9 @@ export default function AdminDashboardPage() {
     code: '',
     sortOrder: 1,
   });
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const modalFileInputRef = useRef<HTMLInputElement>(null);
 
   // Load products from backend API (Admin sees all variants including archived/unpublished)
   const loadAdminProducts = async () => {
@@ -229,17 +287,19 @@ export default function AdminDashboardPage() {
     }
   };
 
-  // Load categories, colors, sizes metadata
+  // Load categories, colors, sizes, carousels metadata
   const loadMetadata = async () => {
     try {
-      const [cats, cols, szs] = await Promise.all([
+      const [cats, cols, szs, crs] = await Promise.all([
         fetchAdminCategories(),
         fetchAdminColors(),
         fetchAdminSizes(),
+        fetchCarousels(),
       ]);
       if (Array.isArray(cats)) setRawCategories(cats);
       if (Array.isArray(cols)) setRawColors(cols);
       if (Array.isArray(szs)) setRawSizes(szs);
+      if (Array.isArray(crs)) setRawCarousels(crs);
     } catch (e) {
       console.warn('Failed to load admin metadata:', e);
     }
@@ -327,6 +387,21 @@ export default function AdminDashboardPage() {
 
   // Helper to reset product modal state
   const resetFormState = () => {
+    // Revoke any local blob URLs to free memory
+    for (const url of productForm.images) {
+      if (url?.startsWith('blob:')) {
+        try { URL.revokeObjectURL(url); } catch {}
+      }
+    }
+    for (const v of stagedVariants) {
+      if (v.images) {
+        for (const url of v.images) {
+          if (url?.startsWith('blob:')) {
+            try { URL.revokeObjectURL(url); } catch {}
+          }
+        }
+      }
+    }
     setProductForm({
       selectedProductId: '',
       name: '',
@@ -342,6 +417,7 @@ export default function AdminDashboardPage() {
       sellingPrice: '',
       stock: '',
       images: [],
+      imageFiles: [],
       imageInput: '',
       isEditing: false,
     });
@@ -388,6 +464,7 @@ export default function AdminDashboardPage() {
       stock: String(row.stock ?? 0),
       sku: row.sku || v?.sku || '',
       images: variantImages,
+      imageFiles: [],
       imageInput: '',
       isPublished: row.isPublished ?? true,
     });
@@ -413,13 +490,81 @@ export default function AdminDashboardPage() {
   };
 
   const handleRemoveVariantFormImage = (index: number) => {
+    const targetUrl = variantForm.images[index];
+    if (!targetUrl) return;
+
+    // When updating a variant or if the image is an existing R2 asset, prompt confirmation
+    if (variantForm.variantId || !targetUrl.startsWith('blob:')) {
+      setImageToDelete({
+        url: targetUrl,
+        index,
+        type: 'variantForm',
+        productId: variantForm.productId || undefined,
+        variantId: variantForm.variantId || undefined,
+      });
+      return;
+    }
+
+    // Local-only blob removal (before saving/uploading)
+    try {
+      URL.revokeObjectURL(targetUrl);
+    } catch {}
+    const blobIndex = variantForm.images.slice(0, index).filter((u) => u.startsWith('blob:')).length;
     setVariantForm((prev) => ({
       ...prev,
       images: prev.images.filter((_, i) => i !== index),
+      imageFiles: prev.imageFiles.filter((_, i) => i !== blobIndex),
     }));
   };
 
+  // Dedicated variant images handler for direct local file selection (5MB max)
+  // Does NOT call upload API immediately — files are uploaded to R2 during save button click
+  const handleModalVariantImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Strict 5MB limit
+    const MAX_MB = 5;
+    const MAX_BYTES = MAX_MB * 1024 * 1024;
+    if (file.size > MAX_BYTES) {
+      setModalFeedback({
+        type: 'error',
+        text: `Image "${file.name}" is ${(file.size / (1024 * 1024)).toFixed(2)} MB. Maximum allowed size is ${MAX_MB} MB.`,
+      });
+      if (modalFileInputRef.current) modalFileInputRef.current.value = '';
+      return;
+    }
+
+    if (file.type && !file.type.startsWith('image/')) {
+      setModalFeedback({
+        type: 'error',
+        text: `File "${file.name}" is not a valid image. Only JPG, PNG, WEBP, or GIF are allowed.`,
+      });
+      if (modalFileInputRef.current) modalFileInputRef.current.value = '';
+      return;
+    }
+
+    // Create local object URL for instant UI preview without network call
+    const previewUrl = URL.createObjectURL(file);
+    setVariantForm((prev) => ({
+      ...prev,
+      images: [...prev.images, previewUrl],
+      imageFiles: [...prev.imageFiles, file],
+    }));
+
+    setModalFeedback({
+      type: 'success',
+      text: `Selected "${file.name}" (${(file.size / (1024 * 1024)).toFixed(2)} MB). Will upload to Cloudflare R2 when you click Save.`,
+    });
+    setTimeout(() => {
+      setModalFeedback(null);
+    }, 3000);
+
+    if (modalFileInputRef.current) modalFileInputRef.current.value = '';
+  };
+
   // Dedicated Variant Update: Updates ONLY this variant and stock
+  // Uploads image files to Cloudflare R2 on Save click via FormData
   const handleUpdateVariant = async (e: React.FormEvent) => {
     e.preventDefault();
     const authToken = getAuthToken();
@@ -437,36 +582,56 @@ export default function AdminDashboardPage() {
     setModalFeedback(null);
 
     try {
-      const finalImages = [...variantForm.images];
-      if (variantForm.imageInput.trim() && !finalImages.includes(variantForm.imageInput.trim())) {
-        finalImages.push(variantForm.imageInput.trim());
+      // Build FormData to send variant fields and image files together to backend controller
+      const varFormData = new FormData();
+      varFormData.append('price', String(parseFloat(variantForm.price) || 0));
+      if (variantForm.sellingPrice) {
+        varFormData.append('sellingPrice', String(parseFloat(variantForm.sellingPrice)));
+      }
+      varFormData.append('stock', String(parseInt(variantForm.stock, 10) || 0));
+      if (variantForm.colorId) varFormData.append('colorId', variantForm.colorId);
+      if (variantForm.sizeId) varFormData.append('sizeId', variantForm.sizeId);
+      if (variantForm.sku) varFormData.append('sku', variantForm.sku);
+      varFormData.append('isPublished', String(variantForm.isPublished));
+
+      // Append existing permanent URLs (filter out local blob: preview URLs)
+      const existingUrls = variantForm.images.filter((img) => !img.startsWith('blob:'));
+      if (
+        variantForm.imageInput.trim() &&
+        !variantForm.imageInput.trim().startsWith('blob:') &&
+        !existingUrls.includes(variantForm.imageInput.trim())
+      ) {
+        existingUrls.push(variantForm.imageInput.trim());
+      }
+      existingUrls.forEach((img) => varFormData.append('existingImages', img));
+
+      // Append image files so controller uploads them to Cloudflare R2 and saves URLs in product_variants
+      if (variantForm.imageFiles && variantForm.imageFiles.length > 0) {
+        variantForm.imageFiles.forEach((file) => varFormData.append('files', file));
       }
 
-      const payload: any = {
-        price: parseFloat(variantForm.price) || 0,
-        sellingPrice: variantForm.sellingPrice ? parseFloat(variantForm.sellingPrice) : undefined,
-        stock: parseInt(variantForm.stock, 10) || 0,
-        colorId: variantForm.colorId || undefined,
-        sizeId: variantForm.sizeId || undefined,
-        images: finalImages,
-        isPublished: variantForm.isPublished,
-      };
-
       if (variantForm.variantId) {
-        const res = await updateAdminVariant(authToken, variantForm.variantId, payload);
+        const res = await updateAdminVariant(authToken, variantForm.variantId, varFormData);
         if (!res.ok) {
           throw new Error(res.data?.message || 'Failed to update variant');
         }
       } else {
-        const res = await addAdminVariant(authToken, variantForm.productId, payload);
+        const res = await addAdminVariant(authToken, variantForm.productId, varFormData);
         if (!res.ok) {
           throw new Error(res.data?.message || 'Failed to create variant');
         }
       }
 
+      // Cleanup local blob preview URLs
+      for (const img of variantForm.images) {
+        if (img?.startsWith('blob:')) {
+          try { URL.revokeObjectURL(img); } catch {}
+        }
+      }
+
       setModalFeedback({
         type: 'success',
-        text: `Variant for "${variantForm.productName}" updated successfully!`,
+        text: `Variant for "${variantForm.productName}" updated and images saved to R2 successfully!`,
       });
       await loadAdminProducts();
       setTimeout(() => {
@@ -554,10 +719,187 @@ export default function AdminDashboardPage() {
   };
 
   const handleRemoveImage = (indexToRemove: number) => {
+    const targetUrl = productForm.images[indexToRemove];
+    if (!targetUrl) return;
+
+    // When updating a product/variant or if the image is an existing R2 asset, prompt confirmation
+    if (
+      productForm.isEditing ||
+      productForm.selectedProductId ||
+      productForm.editingVariantId ||
+      !targetUrl.startsWith('blob:')
+    ) {
+      setImageToDelete({
+        url: targetUrl,
+        index: indexToRemove,
+        type: 'productForm',
+        productId: productForm.selectedProductId || undefined,
+        variantId: productForm.editingVariantId || undefined,
+      });
+      return;
+    }
+
+    // Local-only blob removal (before saving/uploading)
+    try {
+      URL.revokeObjectURL(targetUrl);
+    } catch {}
+    const blobIndex = productForm.images.slice(0, indexToRemove).filter((u) => u.startsWith('blob:')).length;
     setProductForm((prev) => ({
       ...prev,
       images: prev.images.filter((_, idx) => idx !== indexToRemove),
+      imageFiles: prev.imageFiles.filter((_, idx) => idx !== blobIndex),
     }));
+  };
+
+  // Called when user clicks "Yes, Delete from R2" in the confirmation modal
+  const confirmDeleteImage = async () => {
+    if (!imageToDelete) return;
+    const { url, index, type, productId, variantId } = imageToDelete;
+
+    // If local preview blob, just discard it locally
+    if (url.startsWith('blob:')) {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {}
+      if (type === 'productForm') {
+        const blobIndex = productForm.images.slice(0, index).filter((u) => u.startsWith('blob:')).length;
+        setProductForm((prev) => ({
+          ...prev,
+          images: prev.images.filter((_, idx) => idx !== index),
+          imageFiles: prev.imageFiles.filter((_, idx) => idx !== blobIndex),
+        }));
+      } else {
+        const blobIndex = variantForm.images.slice(0, index).filter((u) => u.startsWith('blob:')).length;
+        setVariantForm((prev) => ({
+          ...prev,
+          images: prev.images.filter((_, idx) => idx !== index),
+          imageFiles: prev.imageFiles.filter((_, idx) => idx !== blobIndex),
+        }));
+      }
+      setImageToDelete(null);
+      return;
+    }
+
+    const authToken = getAuthToken();
+    if (!authToken) {
+      setModalFeedback({ type: 'error', text: 'Admin token missing. Please sign in again.' });
+      setImageToDelete(null);
+      return;
+    }
+
+    setIsDeletingImage(true);
+    try {
+      let isSuccess = false;
+      let feedbackMsg = '';
+
+      if (type === 'variantForm') {
+        if (variantId) {
+          const res = await deleteAdminVariantImage(authToken, variantId, url);
+          if (res.ok) {
+            isSuccess = true;
+          } else {
+            feedbackMsg = res.message || 'Failed to remove image from variant';
+          }
+        } else {
+          const res = await deleteImageFromR2(authToken, url);
+          if (res.ok) isSuccess = true;
+          else feedbackMsg = res.message || 'Failed to delete file from Cloudflare R2';
+        }
+
+        setVariantForm((prev) => ({
+          ...prev,
+          images: prev.images.filter((_, i) => i !== index),
+        }));
+      } else {
+        // type === 'productForm'
+        if (variantId) {
+          const res = await deleteAdminVariantImage(authToken, variantId, url);
+          if (res.ok) isSuccess = true;
+        } else if (productId) {
+          const res = await deleteAdminProductImage(authToken, productId, url);
+          if (res.ok) {
+            isSuccess = true;
+          } else {
+            feedbackMsg = res.message || 'Failed to remove image from product';
+          }
+        } else {
+          const res = await deleteImageFromR2(authToken, url);
+          if (res.ok) isSuccess = true;
+          else feedbackMsg = res.message || 'Failed to delete file from Cloudflare R2';
+        }
+
+        setProductForm((prev) => ({
+          ...prev,
+          images: prev.images.filter((_, idx) => idx !== index),
+        }));
+      }
+
+      await loadAdminProducts();
+
+      setModalFeedback({
+        type: isSuccess ? 'success' : 'error',
+        text: isSuccess
+          ? 'Image deleted from Cloudflare R2 and removed successfully!'
+          : feedbackMsg || 'Image removed from form',
+      });
+      setTimeout(() => {
+        setModalFeedback(null);
+      }, 3500);
+    } catch (err: any) {
+      setModalFeedback({
+        type: 'error',
+        text: err.message || 'Failed to delete image from Cloudflare R2',
+      });
+    } finally {
+      setIsDeletingImage(false);
+      setImageToDelete(null);
+    }
+  };
+
+  // Direct file selection for variant image (5MB max)
+  // Does NOT call upload API on select; file is uploaded to Cloudflare R2 when the user clicks Save Product
+  const handleProductImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Strict 5MB limit
+    const MAX_MB = 5;
+    const MAX_BYTES = MAX_MB * 1024 * 1024;
+    if (file.size > MAX_BYTES) {
+      setModalFeedback({
+        type: 'error',
+        text: `Image "${file.name}" is ${(file.size / (1024 * 1024)).toFixed(2)} MB. Maximum allowed size is ${MAX_MB} MB.`,
+      });
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    if (file.type && !file.type.startsWith('image/')) {
+      setModalFeedback({
+        type: 'error',
+        text: `File "${file.name}" is not a valid image. Only JPG, PNG, WEBP, or GIF are allowed.`,
+      });
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    // Create local object URL for instant preview without network call
+    const previewUrl = URL.createObjectURL(file);
+    setProductForm((prev) => ({
+      ...prev,
+      images: [...prev.images, previewUrl],
+      imageFiles: [...prev.imageFiles, file],
+    }));
+
+    setModalFeedback({
+      type: 'success',
+      text: `Selected "${file.name}" (${(file.size / (1024 * 1024)).toFixed(2)} MB). Will upload to Cloudflare R2 when you click Save.`,
+    });
+    setTimeout(() => {
+      setModalFeedback(null);
+    }, 3000);
+
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   // Stage a variant into the bottom table & clear Part 2 inputs
@@ -588,6 +930,7 @@ export default function AdminDashboardPage() {
       sellingPrice: productForm.sellingPrice ? parseFloat(productForm.sellingPrice) : undefined,
       stock: parseInt(productForm.stock, 10) || 0,
       images: finalImages,
+      imageFiles: [...productForm.imageFiles],
     };
 
     setStagedVariants((prev) => [...prev, newVariant]);
@@ -601,6 +944,7 @@ export default function AdminDashboardPage() {
       sellingPrice: '',
       stock: '',
       images: [],
+      imageFiles: [],
       imageInput: '',
     }));
 
@@ -614,10 +958,19 @@ export default function AdminDashboardPage() {
   };
 
   const handleRemoveStagedVariant = (id: string) => {
+    const target = stagedVariants.find((v) => v.id === id);
+    if (target?.images) {
+      for (const img of target.images) {
+        if (img?.startsWith('blob:')) {
+          try { URL.revokeObjectURL(img); } catch {}
+        }
+      }
+    }
     setStagedVariants((prev) => prev.filter((v) => v.id !== id));
   };
 
   // Action handlers: Save Product and all variants
+  // Performs the product save API call where controller uploads image files to R2 and writes URLs to product_variants table
   const handleAddProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!productForm.name.trim()) {
@@ -657,6 +1010,7 @@ export default function AdminDashboardPage() {
         sellingPrice: productForm.sellingPrice ? parseFloat(productForm.sellingPrice) : undefined,
         stock: parseInt(productForm.stock, 10) || 0,
         images: finalImages,
+        imageFiles: [...productForm.imageFiles],
       });
     }
 
@@ -683,35 +1037,57 @@ export default function AdminDashboardPage() {
           categoryId: productForm.categoryId || undefined,
         });
 
-        // 2. If editing a specific variant, update its details
+        // 2. If editing a specific variant, update its details with FormData (uploading image files to R2)
         if (productForm.editingVariantId) {
           const finalImages = [...productForm.images];
           if (productForm.imageInput.trim() && !finalImages.includes(productForm.imageInput.trim())) {
             finalImages.push(productForm.imageInput.trim());
           }
 
-          await updateAdminVariant(authToken, productForm.editingVariantId, {
-            colorId: productForm.colorId || null,
-            sizeId: productForm.sizeId || null,
-            price: parseFloat(productForm.price) || 0,
-            sellingPrice: productForm.sellingPrice ? parseFloat(productForm.sellingPrice) : undefined,
-            stock: parseInt(productForm.stock, 10) || 0,
-            images: finalImages,
-          });
+          const varFormData = new FormData();
+          if (productForm.colorId) varFormData.append('colorId', productForm.colorId);
+          if (productForm.sizeId) varFormData.append('sizeId', productForm.sizeId);
+          varFormData.append('price', String(parseFloat(productForm.price) || 0));
+          if (productForm.sellingPrice) {
+            varFormData.append('sellingPrice', String(parseFloat(productForm.sellingPrice)));
+          }
+          varFormData.append('stock', String(parseInt(productForm.stock, 10) || 0));
+
+          // Append existing permanent URLs (filter out local blob: URLs)
+          finalImages
+            .filter((img) => !img.startsWith('blob:'))
+            .forEach((img) => varFormData.append('existingImages', img));
+
+          // Append files to upload to R2
+          if (productForm.imageFiles && productForm.imageFiles.length > 0) {
+            productForm.imageFiles.forEach((f) => varFormData.append('files', f));
+          }
+
+          await updateAdminVariant(authToken, productForm.editingVariantId, varFormData);
         }
 
-        // 3. Add any newly staged variants to this product
+        // 3. Add any newly staged variants to this product with FormData
         let addedCount = 0;
         for (const v of variantsToSubmit) {
           if (v.id.startsWith('new-') || (!productForm.editingVariantId && !productForm.isEditing)) {
-            const vRes = await addAdminVariant(authToken, prodId, {
-              colorId: v.colorId,
-              sizeId: v.sizeId,
-              price: v.price,
-              sellingPrice: v.sellingPrice,
-              stock: v.stock,
-              images: v.images,
-            });
+            const vFormData = new FormData();
+            if (v.colorId) vFormData.append('colorId', v.colorId);
+            if (v.sizeId) vFormData.append('sizeId', v.sizeId);
+            vFormData.append('price', String(v.price));
+            if (v.sellingPrice) vFormData.append('sellingPrice', String(v.sellingPrice));
+            vFormData.append('stock', String(v.stock));
+
+            // Append existing permanent URLs
+            (v.images || [])
+              .filter((img) => !img.startsWith('blob:'))
+              .forEach((img) => vFormData.append('existingImages', img));
+
+            // Append files to upload to R2
+            if (v.imageFiles && v.imageFiles.length > 0) {
+              v.imageFiles.forEach((f) => vFormData.append('files', f));
+            }
+
+            const vRes = await addAdminVariant(authToken, prodId, vFormData);
             if (vRes.ok) addedCount++;
           }
         }
@@ -730,25 +1106,46 @@ export default function AdminDashboardPage() {
         return;
       }
 
-      // Creating a new product with all its variants
-      const res = await createAdminProduct(authToken, {
-        name: productForm.name.trim(),
-        tagline: productForm.tagline.trim() || undefined,
-        description: productForm.description.trim() || undefined,
-        features: finalFeatures.length > 0 ? finalFeatures : undefined,
-        categoryId: productForm.categoryId || undefined,
-        variants: variantsToSubmit.map((v) => ({
-          colorId: v.colorId,
-          sizeId: v.sizeId,
-          price: v.price,
-          sellingPrice: v.sellingPrice,
-          stock: v.stock,
-          images: v.images,
-        })),
+      // Creating a new product with all its variants via multipart FormData
+      const prodFormData = new FormData();
+      prodFormData.append('name', productForm.name.trim());
+      if (productForm.tagline.trim()) prodFormData.append('tagline', productForm.tagline.trim());
+      if (productForm.description.trim()) prodFormData.append('description', productForm.description.trim());
+      if (productForm.categoryId) prodFormData.append('categoryId', productForm.categoryId);
+      if (finalFeatures.length > 0) {
+        prodFormData.append('features', JSON.stringify(finalFeatures));
+      }
+
+      // Build clean variants payload (exclude local blob: URLs)
+      const variantsPayload = variantsToSubmit.map((v) => ({
+        colorId: v.colorId || undefined,
+        sizeId: v.sizeId || undefined,
+        price: v.price,
+        sellingPrice: v.sellingPrice || undefined,
+        stock: v.stock,
+        images: (v.images || []).filter((img) => !img.startsWith('blob:')),
+      }));
+      prodFormData.append('variants', JSON.stringify(variantsPayload));
+
+      // Append image files for each variant into FormData
+      variantsToSubmit.forEach((v, idx) => {
+        if (v.imageFiles && v.imageFiles.length > 0) {
+          v.imageFiles.forEach((file) => {
+            prodFormData.append(`variant_${idx}_images`, file);
+            if (idx === 0) {
+              prodFormData.append('files', file);
+            }
+          });
+        }
       });
 
+      const res = await createAdminProduct(authToken, prodFormData);
+
       if (res.ok) {
-        setModalFeedback({ type: 'success', text: `Product saved successfully with ${variantsToSubmit.length} variant(s)!` });
+        setModalFeedback({
+          type: 'success',
+          text: `Product "${productForm.name}" saved successfully with ${variantsToSubmit.length} variant(s)! Images uploaded to R2.`,
+        });
         await loadAdminProducts();
         setTimeout(() => {
           setActiveModal('NONE');
@@ -782,9 +1179,12 @@ export default function AdminDashboardPage() {
     setIsSubmitting(true);
     setModalFeedback(null);
     try {
-      const slug =
-        categoryForm.slug.trim() ||
-        categoryForm.name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-');
+      const slug = categoryForm.name
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+
       const res = await createAdminCategory(authToken, {
         name: categoryForm.name.trim(),
         slug,
@@ -795,7 +1195,7 @@ export default function AdminDashboardPage() {
         setModalFeedback({ type: 'success', text: 'Category created successfully!' });
         await loadMetadata();
         await loadAdminProducts();
-        setCategoryForm({ name: '', slug: '', description: '' });
+        setCategoryForm({ name: '', description: '' });
       } else {
         setModalFeedback({
           type: 'error',
@@ -966,6 +1366,241 @@ export default function AdminDashboardPage() {
     }
   };
 
+  // Carousel Handlers
+  const handleCarouselFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    const selected = Array.from(e.target.files);
+    const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+
+    const validFiles: File[] = [];
+    const previewUrls: string[] = [];
+
+    for (const f of selected) {
+      if (f.size > MAX_FILE_SIZE) {
+        setModalFeedback({
+          type: 'error',
+          text: `File "${f.name}" exceeds 5 MB limit (${(f.size / (1024 * 1024)).toFixed(2)} MB)`,
+        });
+        continue;
+      }
+      if (f.type && !f.type.startsWith('image/')) {
+        setModalFeedback({
+          type: 'error',
+          text: `File "${f.name}" is not an image.`,
+        });
+        continue;
+      }
+      validFiles.push(f);
+      previewUrls.push(URL.createObjectURL(f));
+    }
+
+    if (validFiles.length > 0) {
+      setCarouselForm((prev) => ({
+        ...prev,
+        imageFiles: [...prev.imageFiles, ...validFiles],
+        images: [...prev.images, ...previewUrls],
+      }));
+      setModalFeedback({
+        type: 'success',
+        text: `Added ${validFiles.length} image(s) to carousel. Ready to save!`,
+      });
+    }
+
+    if (carouselFileInputRef.current) {
+      carouselFileInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveCarouselImage = (indexToRemove: number) => {
+    setCarouselForm((prev) => {
+      const removedUrl = prev.images[indexToRemove];
+      if (removedUrl?.startsWith('blob:')) {
+        try {
+          URL.revokeObjectURL(removedUrl);
+        } catch {}
+      }
+      const newImages = prev.images.filter((_, idx) => idx !== indexToRemove);
+      const newFiles = prev.imageFiles.filter((_, idx) => idx !== indexToRemove);
+      return {
+        ...prev,
+        images: newImages,
+        imageFiles: newFiles,
+      };
+    });
+    setPreviewSlideIndex(0);
+  };
+
+  const handleCreateCarousel = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const authToken = getAuthToken();
+    if (!authToken) {
+      setModalFeedback({ type: 'error', text: 'Admin token missing. Please sign in again.' });
+      return;
+    }
+
+    if (!carouselForm.title.trim()) {
+      setModalFeedback({ type: 'error', text: 'Please enter a carousel title.' });
+      return;
+    }
+
+    if (carouselForm.images.length === 0 && carouselForm.imageFiles.length === 0) {
+      setModalFeedback({ type: 'error', text: 'Please upload at least 1 image for the carousel.' });
+      return;
+    }
+
+    setIsSubmitting(true);
+    setModalFeedback(null);
+
+    try {
+      // Retain existing valid URLs (excluding temporary blob preview URLs)
+      const existingUrls = carouselForm.images.filter((img) => !img.startsWith('blob:'));
+
+      const res = await createAdminCarousel(authToken, {
+        title: carouselForm.title.trim(),
+        description: carouselForm.description.trim(),
+        isActive: carouselForm.isActive,
+        images: existingUrls,
+        files: carouselForm.imageFiles,
+      });
+
+      if (res.ok) {
+        setModalFeedback({
+          type: 'success',
+          text: `Carousel "${carouselForm.title}" saved successfully to Cloudflare R2!`,
+        });
+
+        // Revoke temporary blobs
+        carouselForm.images.forEach((img) => {
+          if (img.startsWith('blob:')) {
+            try {
+              URL.revokeObjectURL(img);
+            } catch {}
+          }
+        });
+
+        // Reset form
+        setCarouselForm({
+          title: '',
+          description: '',
+          isActive: true,
+          images: [],
+          imageFiles: [],
+        });
+        setIsAddingNewCarousel(false);
+        setPreviewSlideIndex(0);
+
+        // Refresh list
+        const crs = await fetchCarousels();
+        setRawCarousels(crs);
+      } else {
+        setModalFeedback({
+          type: 'error',
+          text: res.message || 'Failed to save carousel.',
+        });
+      }
+    } catch (err: any) {
+      setModalFeedback({
+        type: 'error',
+        text: err.message || 'Network error while creating carousel.',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleActivateCarousel = async (id: string, title: string) => {
+    const authToken = getAuthToken();
+    if (!authToken) {
+      setModalFeedback({ type: 'error', text: 'Admin token missing. Please sign in again.' });
+      return;
+    }
+
+    setActivatingCarouselId(id);
+    setModalFeedback(null);
+
+    try {
+      const res = await activateAdminCarousel(authToken, id);
+      if (res.ok) {
+        setModalFeedback({
+          type: 'success',
+          text: `Carousel "${title}" is now active on the storefront banner!`,
+        });
+        const crs = await fetchCarousels();
+        setRawCarousels(crs);
+      } else {
+        setModalFeedback({
+          type: 'error',
+          text: res.message || 'Failed to activate carousel.',
+        });
+      }
+    } catch (err: any) {
+      setModalFeedback({
+        type: 'error',
+        text: err.message || 'Error activating carousel.',
+      });
+    } finally {
+      setActivatingCarouselId(null);
+    }
+  };
+
+  const handleRequestDeleteCarousel = (item: CarouselItem) => {
+    if (item.isActive) {
+      setActiveCarouselWarning(item);
+      return;
+    }
+    setModalFeedback(null);
+    setCarouselToDelete(item);
+  };
+
+  const handleConfirmDeleteCarousel = async () => {
+    if (!carouselToDelete) return;
+    const { id, title, isActive } = carouselToDelete;
+
+    if (isActive) {
+      setModalFeedback({
+        type: 'error',
+        text: 'Active carousel cannot be deleted. Please activate another carousel first.',
+      });
+      setCarouselToDelete(null);
+      return;
+    }
+
+    const authToken = getAuthToken();
+    if (!authToken) {
+      setModalFeedback({ type: 'error', text: 'Admin token missing. Please sign in again.' });
+      setCarouselToDelete(null);
+      return;
+    }
+
+    setDeletingCarouselId(id);
+    setModalFeedback(null);
+
+    try {
+      const res = await deleteAdminCarousel(authToken, id);
+      if (res.ok) {
+        setModalFeedback({
+          type: 'success',
+          text: `Carousel "${title}" deleted successfully and images purged from R2!`,
+        });
+        const crs = await fetchCarousels();
+        setRawCarousels(crs);
+        setCarouselToDelete(null);
+      } else {
+        setModalFeedback({
+          type: 'error',
+          text: res.message || 'Failed to delete carousel.',
+        });
+      }
+    } catch (err: any) {
+      setModalFeedback({
+        type: 'error',
+        text: err.message || 'Error deleting carousel.',
+      });
+    } finally {
+      setDeletingCarouselId(null);
+    }
+  };
+
   const authorized = isMounted && (isAdmin || user?.role?.toLowerCase() === 'admin');
 
   // Flatten products into variant-based rows for dashboard table
@@ -979,8 +1614,8 @@ export default function AdminDashboardPage() {
           : p.categoryName || p.categoryId || 'General';
 
       const fallbackImg =
-        p.colors?.[0]?.images?.[0] ||
-        p.images?.[0] ||
+        (p.colors?.[0]?.images?.[0] && formatProductImageUrl(p.colors[0].images[0])) ||
+        (p.images?.[0] && formatProductImageUrl(p.images[0])) ||
         'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80';
 
       if (p.variants && p.variants.length > 0) {
@@ -1007,12 +1642,56 @@ export default function AdminDashboardPage() {
               ? v.stock
               : parseInt(v.stock, 10) || 0;
 
-          const vImg =
-            v.images && v.images.length > 0
-              ? v.images[0]
-              : col?.images && col.images.length > 0
-              ? col.images[0]
-              : fallbackImg;
+          // Robustly parse variant images (array or JSON string)
+          const vImages = Array.isArray(v.images)
+            ? v.images
+            : typeof v.images === 'string' && v.images.startsWith('[')
+            ? (() => {
+                try {
+                  return JSON.parse(v.images);
+                } catch {
+                  return [];
+                }
+              })()
+            : v.images
+            ? [v.images]
+            : [];
+
+          const colImages = Array.isArray(col?.images)
+            ? col.images
+            : typeof col?.images === 'string' && col.images.startsWith('[')
+            ? (() => {
+                try {
+                  return JSON.parse(col.images);
+                } catch {
+                  return [];
+                }
+              })()
+            : col?.images
+            ? [col.images]
+            : [];
+
+          const pImages = Array.isArray(p.images)
+            ? p.images
+            : typeof (p.images as any) === 'string' && (p.images as any).startsWith('[')
+            ? (() => {
+                try {
+                  return JSON.parse(p.images as any);
+                } catch {
+                  return [];
+                }
+              })()
+            : p.images
+            ? [p.images]
+            : [];
+
+          const rawImg =
+            (vImages.length > 0 && vImages[0]) ||
+            (colImages.length > 0 && colImages[0]) ||
+            (pImages.length > 0 && pImages[0]) ||
+            fallbackImg;
+
+          const vImg = formatProductImageUrl(rawImg);
 
           list.push({
             rowId: v.id || `${p.id}-${v.colorId || 'c'}-${v.sizeId || 's'}-${vIdx}`,
@@ -1042,6 +1721,21 @@ export default function AdminDashboardPage() {
         });
       } else {
         const pStock = p.stock !== undefined ? p.stock : 0;
+        const pImages = Array.isArray(p.images)
+          ? p.images
+          : typeof (p.images as any) === 'string' && (p.images as any).startsWith('[')
+          ? (() => {
+              try {
+                return JSON.parse(p.images as any);
+              } catch {
+                return [];
+              }
+            })()
+          : p.images
+          ? [p.images]
+          : [];
+        const rawImg = (pImages.length > 0 && pImages[0]) || fallbackImg;
+
         list.push({
           rowId: String(p.id),
           product: p,
@@ -1059,7 +1753,7 @@ export default function AdminDashboardPage() {
           isOutOfStock: pStock <= 0,
           isPublished: true,
           sku: '',
-          image: fallbackImg,
+          image: formatProductImageUrl(rawImg),
         });
       }
     }
@@ -1391,6 +2085,19 @@ export default function AdminDashboardPage() {
                       onClick={() => {
                         setIsMenuOpen(false);
                         setModalFeedback(null);
+                        setActiveModal('CAROUSEL');
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-zinc-200 hover:text-black hover:bg-[#fef08a] transition-colors text-left cursor-pointer group"
+                    >
+                      <Sliders className="w-4 h-4 text-zinc-400 group-hover:text-black" />
+                      <span>Carousel</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsMenuOpen(false);
+                        setModalFeedback(null);
                         setActiveModal('INVOICE');
                       }}
                       className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-zinc-200 hover:text-black hover:bg-[#fef08a] transition-colors text-left cursor-pointer group border-t border-zinc-800/80 pt-2"
@@ -1464,12 +2171,26 @@ export default function AdminDashboardPage() {
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-3">
                             <div className="relative w-10 h-12 rounded bg-zinc-900 overflow-hidden shrink-0 border border-zinc-800">
-                              <Image
-                                src={row.image}
+                              <img
+                                src={formatProductImageUrl(row.image)}
                                 alt={row.name}
-                                fill
-                                sizes="40px"
-                                className="object-cover"
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  const target = e.currentTarget as HTMLImageElement;
+                                  if (row.image && row.image.includes('.r2.cloudflarestorage.com/')) {
+                                    const parts = row.image.split('.r2.cloudflarestorage.com/');
+                                    if (parts[1]) {
+                                      let key = parts[1].replace(/^\/+/, '');
+                                      if (key.startsWith('stylishfox-images/')) {
+                                        key = key.replace(/^stylishfox-images\//, '');
+                                      }
+                                      target.src = `${API_BASE_URL}/uploads/file/${key}`;
+                                      return;
+                                    }
+                                  }
+                                  target.src =
+                                    'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=400&q=80';
+                                }}
                               />
                             </div>
                             <div className="flex flex-col min-w-0">
@@ -1618,7 +2339,7 @@ export default function AdminDashboardPage() {
       {/* Management Modals */}
       {activeModal !== 'NONE' && activeModal !== 'INVOICE' && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className={`bg-zinc-950 border border-zinc-800 rounded-2xl w-full ${activeModal === 'ADD_PRODUCT' ? 'max-w-2xl' : activeModal === 'EDIT_VARIANT' ? 'max-w-xl' : 'max-w-lg'} p-6 shadow-2xl relative my-8 animate-in fade-in zoom-in-95 duration-150 text-white max-h-[90vh] overflow-y-auto`}>
+          <div className={`bg-zinc-950 border border-zinc-800 rounded-2xl w-full ${activeModal === 'ADD_PRODUCT' ? 'max-w-2xl' : activeModal === 'EDIT_VARIANT' ? 'max-w-xl' : activeModal === 'CAROUSEL' ? 'max-w-3xl' : 'max-w-lg'} p-6 shadow-2xl relative my-8 animate-in fade-in zoom-in-95 duration-150 text-white max-h-[90vh] overflow-y-auto`}>
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-zinc-900 pb-4 mb-5">
               <div className="flex items-center gap-2.5">
@@ -1651,6 +2372,11 @@ export default function AdminDashboardPage() {
                     <Ruler className="w-4 h-4" />
                   </div>
                 )}
+                {activeModal === 'CAROUSEL' && (
+                  <div className="w-8 h-8 rounded-lg bg-[#fef08a]/10 border border-[#fef08a]/30 flex items-center justify-center text-[#fef08a]">
+                    <Sliders className="w-4 h-4" />
+                  </div>
+                )}
                 <div>
                   <h3 className="text-sm font-black uppercase tracking-wider text-white">
                     {activeModal === 'ADD_PRODUCT' && (productForm.isEditing ? 'Edit Product & Variant' : 'Add New Product')}
@@ -1658,6 +2384,7 @@ export default function AdminDashboardPage() {
                     {activeModal === 'CATEGORY' && 'Category Management'}
                     {activeModal === 'COLORS' && 'Color Palette Management'}
                     {activeModal === 'SIZE' && 'Size Scale Management'}
+                    {activeModal === 'CAROUSEL' && 'Store Banner Carousel Management'}
                   </h3>
                   <p className="text-[11px] text-zinc-400">
                     {activeModal === 'ADD_PRODUCT' &&
@@ -1668,6 +2395,7 @@ export default function AdminDashboardPage() {
                     {activeModal === 'CATEGORY' && 'View and register product categories'}
                     {activeModal === 'COLORS' && 'Manage streetwear color codes & variants'}
                     {activeModal === 'SIZE' && 'Manage apparel size codes and order'}
+                    {activeModal === 'CAROUSEL' && 'Manage storefront homepage banner sliders and R2 imagery'}
                   </p>
                 </div>
               </div>
@@ -1732,9 +2460,10 @@ export default function AdminDashboardPage() {
                           <Check className="w-3 h-3" /> Auto-filled from Existing Product
                         </span>
                       ) : (
-                        <span className="text-[10px] text-zinc-500">
-                          Select dropdown to auto-fill or enter custom name
-                        </span>
+                        // <span className="text-[10px] text-zinc-500">
+                        //   Select dropdown to auto-fill or enter custom name
+                        // </span>
+                        ""
                       )}
                     </div>
 
@@ -1814,9 +2543,9 @@ export default function AdminDashboardPage() {
                       </div>
                     )}
 
-                    <p className="text-[10px] text-zinc-500">
+                    {/* <p className="text-[10px] text-zinc-500">
                       Selecting an existing product automatically populates all Part 1 specifications (Tagline, Category, Description, Features).
-                    </p>
+                    </p> */}
                   </div>
 
                   {/* Tagline & Category */}
@@ -2033,42 +2762,50 @@ export default function AdminDashboardPage() {
                   </div>
 
                   {/* Images (Array) */}
+                  {/* Images (Direct Cloudflare R2 File Upload, Max 5MB) */}
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
-                      <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider">
-                        Images (Array)
+                      <label className="flex items-center gap-2 text-[11px] font-bold text-zinc-300 uppercase tracking-wider">
+                        <span>Variant Images</span>
+                        <span className="px-1.5 py-0.5 rounded bg-[#fef08a]/10 border border-[#fef08a]/30 text-[9px] font-mono text-[#fef08a]">
+                          Cloudflare R2 • Max 5 MB
+                        </span>
                       </label>
-                      <span className="text-[10px] text-zinc-500">
+                      <span className="text-[10px] text-zinc-500 font-mono">
                         {productForm.images.length} image{productForm.images.length === 1 ? '' : 's'} added
                       </span>
                     </div>
 
-                    <div className="flex gap-2 mb-2">
+                    {/* Direct File Selector & Dropzone */}
+                    <div className="relative border-2 border-dashed border-zinc-800 hover:border-[#fef08a]/50 rounded-xl p-4 bg-zinc-950/60 transition-all text-center">
                       <input
-                        type="url"
-                        placeholder="https://images.unsplash.com/photo-... (Press Enter to add)"
-                        value={productForm.imageInput}
-                        onChange={(e) => setProductForm({ ...productForm, imageInput: e.target.value })}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleAddImage();
-                          }
-                        }}
-                        className="flex-1 px-3.5 py-2 bg-zinc-900 border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#fef08a]"
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/gif"
+                        onChange={handleProductImageSelect}
+                        className="hidden"
+                        id="product-variant-file-input"
                       />
-                      <button
-                        type="button"
-                        onClick={handleAddImage}
-                        className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-bold text-white border border-zinc-700 transition-colors cursor-pointer shrink-0"
+
+                      <label
+                        htmlFor="product-variant-file-input"
+                        className="flex flex-col items-center justify-center cursor-pointer group py-1"
                       >
-                        + Add Image
-                      </button>
+                        <div className="w-10 h-10 rounded-full bg-zinc-900 group-hover:bg-[#fef08a]/10 border border-zinc-800 group-hover:border-[#fef08a]/40 flex items-center justify-center mb-2 transition-colors shadow">
+                          <UploadCloud className="w-5 h-5 text-zinc-400 group-hover:text-[#fef08a] transition-colors" />
+                        </div>
+                        <span className="text-xs font-bold text-zinc-200 group-hover:text-[#fef08a] transition-colors">
+                          Click to select image file from your device
+                        </span>
+                        <span className="text-[10px] text-zinc-500 mt-0.5">
+                          PNG, JPG, WEBP, or GIF • Strict 5 MB limit • Uploads to Cloudflare R2 when you click Save Product
+                        </span>
+                      </label>
                     </div>
 
                     {/* Image Previews Grid */}
                     {productForm.images.length > 0 && (
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-2 bg-zinc-950/70 border border-zinc-800 rounded-xl max-h-48 overflow-y-auto mb-2">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-2 bg-zinc-950/70 border border-zinc-800 rounded-xl max-h-48 overflow-y-auto mt-2.5">
                         {productForm.images.map((imgUrl, idx) => (
                           <div
                             key={idx}
@@ -2079,6 +2816,13 @@ export default function AdminDashboardPage() {
                               alt={`Variant Image ${idx + 1}`}
                               className="w-full h-full object-cover"
                               onError={(e) => {
+                                if (imgUrl.includes('.r2.cloudflarestorage.com/')) {
+                                  const parts = imgUrl.split('.r2.cloudflarestorage.com/');
+                                  if (parts[1]) {
+                                    (e.currentTarget as HTMLImageElement).src = `${API_BASE_URL}/uploads/file/${parts[1]}`;
+                                    return;
+                                  }
+                                }
                                 (e.currentTarget as HTMLImageElement).src =
                                   'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=400&q=80';
                               }}
@@ -2093,8 +2837,8 @@ export default function AdminDashboardPage() {
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </div>
-                            <span className="absolute bottom-1 left-1 bg-black/80 px-1.5 py-0.5 rounded text-[9px] font-mono text-zinc-300">
-                              #{idx + 1}
+                            <span className="absolute bottom-1 left-1 bg-black/80 px-1.5 py-0.5 rounded text-[9px] font-mono text-[#fef08a] border border-[#fef08a]/20">
+                              #{idx + 1} • {imgUrl.startsWith('blob:') ? 'Ready for R2' : 'R2'}
                             </span>
                           </div>
                         ))}
@@ -2273,12 +3017,14 @@ export default function AdminDashboardPage() {
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="relative w-12 h-14 rounded-lg bg-zinc-900 overflow-hidden shrink-0 border border-zinc-800">
                       {variantForm.productImage ? (
-                        <Image
-                          src={variantForm.productImage}
+                        <img
+                          src={formatProductImageUrl(variantForm.productImage)}
                           alt={variantForm.productName}
-                          fill
-                          sizes="48px"
-                          className="object-cover"
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).src =
+                              'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=400&q=80';
+                          }}
                         />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-zinc-600">
@@ -2601,34 +3347,45 @@ export default function AdminDashboardPage() {
                   </div>
                 </div>
 
-                {/* Variant Images Array */}
+                {/* Variant Images (Direct File Upload to Cloudflare R2, max 5MB) */}
                 <div>
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 block mb-1.5">
-                    Variant Images ({variantForm.images.length})
-                  </label>
-                  <div className="flex gap-2">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                      <span>Variant Images</span>
+                      <span className="px-1.5 py-0.5 rounded bg-amber-400/10 border border-amber-400/30 text-[9px] font-mono text-[#fef08a]">
+                        Cloudflare R2 • Max 5 MB
+                      </span>
+                    </label>
+                    <span className="text-[10px] text-zinc-500 font-mono">
+                      {variantForm.images.length} image{variantForm.images.length === 1 ? '' : 's'}
+                    </span>
+                  </div>
+
+                  {/* Direct File Selector Card */}
+                  <div className="relative border-2 border-dashed border-zinc-800 hover:border-[#fef08a]/50 rounded-xl p-3 bg-zinc-950/60 transition-all text-center">
                     <input
-                      type="url"
-                      value={variantForm.imageInput}
-                      onChange={(e) =>
-                        setVariantForm((prev) => ({ ...prev, imageInput: e.target.value }))
-                      }
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          handleAddVariantFormImage();
-                        }
-                      }}
-                      placeholder="https://images.unsplash.com/photo-..."
-                      className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-[#fef08a]"
+                      ref={modalFileInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      onChange={handleModalVariantImageSelect}
+                      className="hidden"
+                      id="modal-variant-file-input"
                     />
-                    <button
-                      type="button"
-                      onClick={handleAddVariantFormImage}
-                      className="px-3.5 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-xs transition-colors shrink-0 cursor-pointer"
+
+                    <label
+                      htmlFor="modal-variant-file-input"
+                      className="flex flex-col items-center justify-center cursor-pointer group py-1"
                     >
-                      Add Image
-                    </button>
+                      <div className="w-8 h-8 rounded-full bg-zinc-900 group-hover:bg-[#fef08a]/10 border border-zinc-800 group-hover:border-[#fef08a]/40 flex items-center justify-center mb-1.5 transition-colors shadow">
+                        <UploadCloud className="w-4 h-4 text-zinc-400 group-hover:text-[#fef08a] transition-colors" />
+                      </div>
+                      <span className="text-xs font-bold text-zinc-200 group-hover:text-[#fef08a] transition-colors">
+                        Select Variant Image from device
+                      </span>
+                      <span className="text-[10px] text-zinc-500 mt-0.5">
+                        PNG, JPG, WEBP, or GIF (Max 5 MB) • Uploads to Cloudflare R2 when you click Save
+                      </span>
+                    </label>
                   </div>
 
                   {/* Previews */}
@@ -2639,12 +3396,21 @@ export default function AdminDashboardPage() {
                           key={`var-img-${idx}`}
                           className="relative w-16 h-16 rounded-lg overflow-hidden border border-zinc-700 group bg-zinc-900 shrink-0"
                         >
-                          <Image
+                          <img
                             src={img}
                             alt={`Variant ${idx + 1}`}
-                            fill
-                            sizes="64px"
-                            className="object-cover"
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              if (img.includes('.r2.cloudflarestorage.com/')) {
+                                const parts = img.split('.r2.cloudflarestorage.com/');
+                                if (parts[1]) {
+                                  (e.currentTarget as HTMLImageElement).src = `${API_BASE_URL}/uploads/file/${parts[1]}`;
+                                  return;
+                                }
+                              }
+                              (e.currentTarget as HTMLImageElement).src =
+                                'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=400&q=80';
+                            }}
                           />
                           <button
                             type="button"
@@ -2654,8 +3420,8 @@ export default function AdminDashboardPage() {
                           >
                             <X className="w-3 h-3" />
                           </button>
-                          <span className="absolute bottom-1 left-1 px-1 py-0.2 rounded bg-black/70 text-[9px] font-mono text-zinc-300">
-                            #{idx + 1}
+                          <span className="absolute bottom-1 left-1 px-1 py-0.2 rounded bg-black/70 text-[9px] font-mono text-[#fef08a]">
+                            #{idx + 1} {img.startsWith('blob:') ? '• Ready' : '• R2'}
                           </span>
                         </div>
                       ))}
@@ -2750,25 +3516,10 @@ export default function AdminDashboardPage() {
                       required
                       placeholder="e.g. Winter Outerwear"
                       value={categoryForm.name}
-                      onChange={(e) => {
-                        const name = e.target.value;
-                        const slug = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-');
-                        setCategoryForm({ ...categoryForm, name, slug });
-                      }}
+                      onChange={(e) =>
+                        setCategoryForm({ ...categoryForm, name: e.target.value })
+                      }
                       className="w-full px-3.5 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#fef08a]"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider mb-1">
-                      URL Slug
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="winter-outerwear"
-                      value={categoryForm.slug}
-                      onChange={(e) => setCategoryForm({ ...categoryForm, slug: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-xs text-white font-mono placeholder-zinc-500 focus:outline-none focus:border-[#fef08a]"
                     />
                   </div>
 
@@ -3010,6 +3761,619 @@ export default function AdminDashboardPage() {
                 </form>
               </div>
             )}
+
+            {/* 5. CAROUSEL MODAL (Store Banner Slider Management) */}
+            {activeModal === 'CAROUSEL' && (
+              <div className="flex flex-col gap-6">
+                {/* Top Section: Header & "Add New Carousel" Button */}
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <span className="text-xs font-bold text-white uppercase tracking-wider block">
+                      Existing Carousels ({rawCarousels.length})
+                    </span>
+                    <span className="text-[11px] text-zinc-400">
+                      The carousel highlighted in green is currently live on customer storefront.
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAddingNewCarousel((prev) => !prev);
+                      setModalFeedback(null);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-[#fef08a] hover:bg-yellow-300 text-black font-extrabold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  >
+                    {isAddingNewCarousel ? (
+                      <>
+                        <X className="w-4 h-4" />
+                        <span>Close Form</span>
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="w-4 h-4" />
+                        <span>Add New Carousel</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* List of Existing Carousels */}
+                <div className="flex flex-col gap-3 max-h-60 overflow-y-auto pr-1">
+                  {rawCarousels.length === 0 ? (
+                    <div className="p-8 text-center bg-zinc-900/40 border border-zinc-800/80 rounded-2xl">
+                      <Sliders className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+                      <p className="text-xs text-zinc-400 font-medium">No custom carousels created yet.</p>
+                      <p className="text-[11px] text-zinc-500 mt-0.5">Click &quot;Add New Carousel&quot; to upload high-resolution banner images to Cloudflare R2.</p>
+                    </div>
+                  ) : (
+                    rawCarousels.map((c) => (
+                      <div
+                        key={c.id}
+                        className={`p-3.5 rounded-2xl border transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
+                          c.isActive
+                            ? 'bg-emerald-950/20 border-emerald-500/50 shadow-lg shadow-emerald-500/5'
+                            : 'bg-zinc-900/60 border-zinc-800 hover:border-zinc-700'
+                        }`}
+                      >
+                        {/* Left: Info & Thumbnails */}
+                        <div className="flex items-center gap-3.5 min-w-0">
+                          {/* First Image Thumbnail */}
+                          <div className="w-16 h-12 rounded-lg overflow-hidden bg-zinc-900 border border-zinc-800 relative shrink-0">
+                            {c.images && c.images.length > 0 ? (
+                              <img
+                                src={formatProductImageUrl(c.images[0])}
+                                alt={c.title}
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLImageElement).src =
+                                    'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&q=80&w=400';
+                                }}
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-zinc-600">
+                                <ImageIcon className="w-4 h-4" />
+                              </div>
+                            )}
+                            <span className="absolute bottom-0.5 right-0.5 px-1 py-0.2 rounded bg-black/80 text-[8px] font-mono text-zinc-300">
+                              {c.images?.length || 0}
+                            </span>
+                          </div>
+
+                          <div className="flex flex-col min-w-0">
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-xs font-bold text-white uppercase tracking-wider truncate">
+                                {c.title}
+                              </h4>
+                              {c.isActive ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                  Active Banner
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold text-zinc-400 bg-zinc-800 border border-zinc-700">
+                                  Inactive
+                                </span>
+                              )}
+                            </div>
+                            {c.description && (
+                              <p className="text-[11px] text-zinc-400 truncate max-w-sm mt-0.5">
+                                {c.description}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Right: Actions (Activate, Delete) */}
+                        <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                          {!c.isActive && (
+                            <button
+                              type="button"
+                              onClick={() => handleActivateCarousel(c.id, c.title)}
+                              disabled={activatingCarouselId === c.id}
+                              className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-emerald-500 hover:text-black border border-zinc-700 text-zinc-200 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                              title="Set as active store banner"
+                            >
+                              {activatingCarouselId === c.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                              )}
+                              <span>Activate</span>
+                            </button>
+                          )}
+
+                          {c.isActive ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setModalFeedback(null);
+                                setActiveCarouselWarning(c);
+                              }}
+                              className="p-2 rounded-xl bg-zinc-900 hover:bg-amber-500/10 border border-zinc-800 hover:border-amber-500/40 text-amber-400/80 hover:text-amber-300 transition-all cursor-pointer flex items-center gap-1 group/lock"
+                              title="Active carousel cannot be deleted. Click to view info."
+                            >
+                              <Lock className="w-3.5 h-3.5 group-hover/lock:scale-110 transition-transform" />
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleRequestDeleteCarousel(c)}
+                              disabled={deletingCarouselId === c.id}
+                              className="p-2 rounded-xl bg-zinc-800/80 hover:bg-red-500/20 hover:text-red-400 border border-zinc-700/80 text-zinc-400 transition-colors cursor-pointer"
+                              title="Delete carousel"
+                            >
+                              {deletingCarouselId === c.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
+                              ) : (
+                                <Trash2 className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Create New Carousel Section */}
+                {isAddingNewCarousel && (
+                  <form
+                    onSubmit={handleCreateCarousel}
+                    className="border-t border-zinc-900 pt-5 flex flex-col gap-4 animate-in fade-in duration-200"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black uppercase tracking-wider text-white flex items-center gap-1.5">
+                        <UploadCloud className="w-4 h-4 text-[#fef08a]" />
+                        <span>Add New Banner Carousel (Cloudflare R2)</span>
+                      </span>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={carouselForm.isActive}
+                          onChange={(e) =>
+                            setCarouselForm((prev) => ({ ...prev, isActive: e.target.checked }))
+                          }
+                          className="w-4 h-4 rounded bg-zinc-900 border-zinc-700 text-[#fef08a] focus:ring-0 cursor-pointer accent-[#fef08a]"
+                        />
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-300">
+                          Set as Active Banner
+                        </span>
+                      </label>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      <div>
+                        <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider mb-1">
+                          Carousel Title *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. Summer Streetwear 2026"
+                          value={carouselForm.title}
+                          onChange={(e) =>
+                            setCarouselForm((prev) => ({ ...prev, title: e.target.value }))
+                          }
+                          className="w-full px-3.5 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#fef08a]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider mb-1">
+                          Subheading / Description (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Up to 40% off on all outerwear drop"
+                          value={carouselForm.description}
+                          onChange={(e) =>
+                            setCarouselForm((prev) => ({ ...prev, description: e.target.value }))
+                          }
+                          className="w-full px-3.5 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#fef08a]"
+                        />
+                      </div>
+                    </div>
+
+                    {/* LIVE INTERACTIVE CAROUSEL PREVIEW SESSION */}
+                    {carouselForm.images.length > 0 && (
+                      <div className="flex flex-col gap-2 rounded-2xl bg-zinc-900/60 border border-zinc-800/80 p-3.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-[#fef08a] uppercase tracking-wider flex items-center gap-1.5">
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Live Carousel Preview ({previewSlideIndex + 1} / {carouselForm.images.length})</span>
+                          </span>
+                          <span className="text-[10px] text-zinc-400">
+                            Click thumbnails below or dots to switch slides
+                          </span>
+                        </div>
+
+                        {/* Large Preview Container */}
+                        <div className="relative w-full h-44 sm:h-52 rounded-xl overflow-hidden bg-black border border-zinc-800 flex items-center justify-center">
+                          <img
+                            src={carouselForm.images[previewSlideIndex]}
+                            alt="Carousel Preview"
+                            className="w-full h-full object-cover transition-all duration-300"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex flex-col justify-end p-4 pointer-events-none">
+                            <span className="inline-block px-2 py-0.5 rounded bg-[#fef08a] text-black text-[9px] font-black uppercase tracking-wider w-fit mb-1">
+                              Preview Banner
+                            </span>
+                            <h3 className="text-base font-black uppercase text-white drop-shadow">
+                              {carouselForm.title || 'Your Carousel Title Here'}
+                            </h3>
+                            {carouselForm.description && (
+                              <p className="text-[11px] text-zinc-300 drop-shadow line-clamp-1">
+                                {carouselForm.description}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Dots */}
+                          <div className="absolute bottom-2.5 left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-10">
+                            {carouselForm.images.map((_, dotIdx) => (
+                              <button
+                                key={dotIdx}
+                                type="button"
+                                onClick={() => setPreviewSlideIndex(dotIdx)}
+                                className={`h-1.5 rounded-full transition-all cursor-pointer ${
+                                  dotIdx === previewSlideIndex ? 'w-5 bg-[#fef08a]' : 'w-1.5 bg-white/40'
+                                }`}
+                              />
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Thumbnail Strip with Delete Options */}
+                        <div className="flex items-center gap-2 overflow-x-auto py-1">
+                          {carouselForm.images.map((img, imgIdx) => (
+                            <div
+                              key={imgIdx}
+                              onClick={() => setPreviewSlideIndex(imgIdx)}
+                              className={`relative w-16 h-12 rounded-lg overflow-hidden border cursor-pointer shrink-0 transition-all ${
+                                imgIdx === previewSlideIndex
+                                  ? 'border-[#fef08a] scale-105 shadow-md shadow-yellow-500/20'
+                                  : 'border-zinc-700 opacity-70 hover:opacity-100'
+                              }`}
+                            >
+                              <img
+                                src={img}
+                                alt={`Thumb ${imgIdx + 1}`}
+                                className="w-full h-full object-cover"
+                              />
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRemoveCarouselImage(imgIdx);
+                                }}
+                                className="absolute top-0.5 right-0.5 p-0.5 rounded bg-black/80 text-white hover:bg-red-600 transition-colors"
+                                title="Remove image"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Multiple Image Upload Box */}
+                    <div>
+                      <input
+                        type="file"
+                        ref={carouselFileInputRef}
+                        onChange={handleCarouselFileChange}
+                        multiple
+                        accept="image/png,image/jpeg,image/webp,image/jpg"
+                        className="hidden"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => carouselFileInputRef.current?.click()}
+                        className="w-full border-2 border-dashed border-zinc-800 hover:border-[#fef08a] rounded-2xl p-5 flex flex-col items-center justify-center gap-2 text-zinc-400 hover:text-white transition-all bg-zinc-900/30 hover:bg-zinc-900/60 cursor-pointer"
+                      >
+                        <div className="w-10 h-10 rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center text-[#fef08a]">
+                          <UploadCloud className="w-5 h-5" />
+                        </div>
+                        <span className="text-xs font-bold text-white uppercase tracking-wider">
+                          Select Banner Images to Upload
+                        </span>
+                        <span className="text-[11px] text-zinc-400">
+                          Multiple files supported • Max 5 MB each • Automatically saved to Cloudflare R2 (/carousels)
+                        </span>
+                      </button>
+                    </div>
+
+                    {/* Save Carousel Button */}
+                    <button
+                      type="submit"
+                      disabled={isSubmitting || (carouselForm.images.length === 0 && carouselForm.imageFiles.length === 0)}
+                      className="mt-2 w-full py-3 rounded-xl bg-[#fef08a] hover:bg-yellow-300 text-black font-extrabold uppercase tracking-wider text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 shadow-lg shadow-yellow-500/10"
+                    >
+                      {isSubmitting ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin text-black" />
+                          <span>Uploading &amp; Saving Carousel to R2...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-4 h-4 text-black" />
+                          <span>Save Carousel &amp; Upload to R2</span>
+                        </>
+                      )}
+                    </button>
+                  </form>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Cloudflare R2 Image Deletion Confirmation Modal */}
+      {imageToDelete && (
+        <div className="fixed inset-0 z-[70] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative text-white animate-in zoom-in-95 duration-150">
+            {/* Header with Alert Icon */}
+            <div className="flex items-start gap-3.5 mb-4">
+              <div className="w-10 h-10 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-red-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-bold text-white tracking-tight">
+                  Delete Image from Cloudflare R2?
+                </h3>
+                <p className="text-xs text-zinc-400 mt-1">
+                  This image will be permanently deleted from Cloudflare R2 bucket storage and removed from this product variant.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setImageToDelete(null)}
+                disabled={isDeletingImage}
+                className="p-1 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Thumbnail Preview */}
+            <div className="my-4 p-3 rounded-xl bg-zinc-900/60 border border-zinc-800/80 flex items-center gap-3.5">
+              <div className="w-16 h-16 rounded-lg overflow-hidden border border-zinc-700 bg-zinc-900 shrink-0 relative">
+                <img
+                  src={imageToDelete.url}
+                  alt="Delete preview"
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    if (imageToDelete.url.includes('.r2.cloudflarestorage.com/')) {
+                      const parts = imageToDelete.url.split('.r2.cloudflarestorage.com/');
+                      if (parts[1]) {
+                        (e.currentTarget as HTMLImageElement).src = `${API_BASE_URL}/uploads/file/${parts[1]}`;
+                        return;
+                      }
+                    }
+                    (e.currentTarget as HTMLImageElement).src =
+                      'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=400&q=80';
+                  }}
+                />
+              </div>
+              <div className="flex-1 min-w-0 text-left">
+                <span className="inline-block px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20 text-red-400 font-mono text-[10px] font-bold uppercase mb-1">
+                  R2 Asset
+                </span>
+                <p className="text-[11px] text-zinc-400 font-mono truncate">
+                  {imageToDelete.url.startsWith('blob:')
+                    ? 'Local Preview'
+                    : imageToDelete.url.split('/').pop() || imageToDelete.url}
+                </p>
+                <p className="text-[10px] text-zinc-500 mt-0.5">
+                  Action cannot be undone.
+                </p>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-zinc-900">
+              <button
+                type="button"
+                onClick={() => setImageToDelete(null)}
+                disabled={isDeletingImage}
+                className="px-4 py-2.5 rounded-xl border border-zinc-800 hover:bg-zinc-900 text-zinc-300 font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteImage}
+                disabled={isDeletingImage}
+                className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs uppercase tracking-wider transition-colors flex items-center gap-2 cursor-pointer shadow-lg shadow-red-950/40 disabled:opacity-50"
+              >
+                {isDeletingImage ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Deleting from R2...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Yes, Delete from R2</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Carousel Delete Warning & Confirmation Modal */}
+      {carouselToDelete && (
+        <div className="fixed inset-0 z-[75] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative text-white animate-in zoom-in-95 duration-150">
+            {/* Header with Alert Warning Icon */}
+            <div className="flex items-start gap-3.5 mb-4">
+              <div className="w-10 h-10 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-red-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-bold text-white tracking-tight">
+                  Delete Carousel from Cloudflare R2?
+                </h3>
+                <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                  This carousel and all its images will be permanently deleted from Cloudflare R2 bucket storage.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCarouselToDelete(null)}
+                disabled={deletingCarouselId === carouselToDelete.id}
+                className="p-1 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Thumbnail and Details Preview */}
+            <div className="my-4 p-3 rounded-xl bg-zinc-900/60 border border-zinc-800/80 flex items-center gap-3.5">
+              <div className="w-16 h-16 rounded-lg overflow-hidden border border-zinc-700 bg-zinc-900 shrink-0 relative">
+                {carouselToDelete.images && carouselToDelete.images.length > 0 ? (
+                  <img
+                    src={formatProductImageUrl(carouselToDelete.images[0])}
+                    alt={carouselToDelete.title}
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src =
+                        'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&q=80&w=400';
+                    }}
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-zinc-600">
+                    <ImageIcon className="w-5 h-5" />
+                  </div>
+                )}
+              </div>
+              <div className="flex-1 min-w-0 text-left">
+                <span className="inline-block px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20 text-red-400 font-mono text-[10px] font-bold uppercase mb-1">
+                  R2 ASSET
+                </span>
+                <p className="text-[11px] text-zinc-400 font-mono truncate">
+                  {carouselToDelete.title} ({carouselToDelete.images?.length || 0} images)
+                </p>
+                <p className="text-[10px] text-zinc-500 mt-0.5">
+                  Action cannot be undone.
+                </p>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-zinc-900">
+              <button
+                type="button"
+                onClick={() => setCarouselToDelete(null)}
+                disabled={deletingCarouselId === carouselToDelete.id}
+                className="px-4 py-2.5 rounded-xl border border-zinc-800 hover:bg-zinc-900 text-zinc-300 font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer"
+              >
+                CANCEL
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteCarousel}
+                disabled={deletingCarouselId === carouselToDelete.id}
+                className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs uppercase tracking-wider transition-colors flex items-center gap-2 cursor-pointer shadow-lg shadow-red-950/40 disabled:opacity-50"
+              >
+                {deletingCarouselId === carouselToDelete.id ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>DELETING</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>YES, DELETE</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Active Carousel Deletion Blocked Warning Modal (Reference Style) */}
+      {activeCarouselWarning && (
+        <div className="fixed inset-0 z-[75] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative text-white animate-in zoom-in-95 duration-150">
+            {/* Header with Alert Warning Icon */}
+            <div className="flex items-start gap-3.5 mb-4">
+              <div className="w-10 h-10 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-amber-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-bold text-white tracking-tight">
+                  Cannot Delete Active Carousel
+                </h3>
+                <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                  <strong className="text-white">&quot;{activeCarouselWarning.title}&quot;</strong> is currently live on the storefront as the active banner. To delete this carousel, you must activate another carousel first.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveCarouselWarning(null)}
+                className="p-1 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Thumbnail and Details Preview */}
+            <div className="my-4 p-3 rounded-xl bg-zinc-900/60 border border-zinc-800/80 flex items-center gap-3.5">
+              <div className="w-20 h-14 rounded-lg overflow-hidden border border-emerald-500/40 bg-zinc-900 shrink-0 relative">
+                {activeCarouselWarning.images && activeCarouselWarning.images.length > 0 ? (
+                  <img
+                    src={formatProductImageUrl(activeCarouselWarning.images[0])}
+                    alt={activeCarouselWarning.title}
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src =
+                        'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&q=80&w=400';
+                    }}
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-zinc-600">
+                    <ImageIcon className="w-5 h-5" />
+                  </div>
+                )}
+                <span className="absolute bottom-0.5 right-0.5 px-1 py-0.2 rounded bg-black/80 text-[8px] font-mono text-emerald-400">
+                  {activeCarouselWarning.images?.length || 0} img
+                </span>
+              </div>
+              <div className="flex-1 min-w-0 text-left">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="inline-block px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono text-[10px] font-bold uppercase">
+                    Active Banner
+                  </span>
+                  <span className="text-[10px] text-zinc-500 font-mono">
+                    Protected
+                  </span>
+                </div>
+                <p className="text-xs font-bold text-white uppercase truncate">
+                  {activeCarouselWarning.title}
+                </p>
+                <p className="text-[10px] text-amber-400/90 mt-1 font-medium">
+                  Please activate a different carousel before deleting this one.
+                </p>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-zinc-900">
+              <button
+                type="button"
+                onClick={() => setActiveCarouselWarning(null)}
+                className="w-full py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer text-center"
+              >
+                I Understand
+              </button>
+            </div>
           </div>
         </div>
       )}

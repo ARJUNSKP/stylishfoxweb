@@ -19,7 +19,7 @@ import { Product, getAllProducts } from '@/data/products';
 import { useCart } from '@/context/CartContext';
 import { useProfile } from '@/context/ProfileContext';
 import { createWhatsAppOrderUrl, createWhatsAppRebookUrl } from '@/utils/whatsapp';
-import { fetchRelatedProducts } from '@/utils/api';
+import { fetchRelatedProducts, formatProductImageUrl } from '@/utils/api';
 
 interface Props {
   product: Product;
@@ -125,13 +125,13 @@ export default function ProductDetailClient({
 
   // Gallery images: prefer variant-level images if available, else active color images, else fallback
   const activeImages: string[] = useMemo<string[]>(() => {
+    let imgs: string[] = fallbackImages;
     if (currentVariant?.images && Array.isArray(currentVariant.images) && currentVariant.images.length > 0) {
-      return currentVariant.images as string[];
+      imgs = currentVariant.images as string[];
+    } else if (activeColor.images && Array.isArray(activeColor.images) && activeColor.images.length > 0) {
+      imgs = activeColor.images as string[];
     }
-    if (activeColor.images && Array.isArray(activeColor.images) && activeColor.images.length > 0) {
-      return activeColor.images as string[];
-    }
-    return fallbackImages;
+    return imgs.map((img) => formatProductImageUrl(img));
   }, [currentVariant?.images, activeColor.images, fallbackImages]);
 
   // State for active image index in current color's gallery
@@ -384,8 +384,13 @@ export default function ProductDetailClient({
                     src={imgUrl}
                     alt={`${product.name} view ${idx + 1}`}
                     fill
+                    unoptimized
                     sizes="(max-width: 768px) 60px, 96px"
                     className="object-cover object-center"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src =
+                        'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=400&q=80';
+                    }}
                   />
                   {isSelected && (
                     <div className="absolute inset-0 bg-[#fef08a]/10 pointer-events-none" />
@@ -428,8 +433,13 @@ export default function ProductDetailClient({
               alt={`${product.name} - ${activeColor.name}`}
               fill
               priority
+              unoptimized
               sizes="(max-width: 1024px) 100vw, 55vw"
               className="object-cover object-center transition-transform duration-700 group-hover:scale-105"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).src =
+                  'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80';
+              }}
             />
 
             {/* Bottom Color & View Tag */}
@@ -843,10 +853,11 @@ export default function ProductDetailClient({
 
         <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-4 md:gap-6">
           {relatedProducts.map((relProduct, idx) => {
-            const relImage =
+            const relImage = formatProductImageUrl(
               relProduct.colors?.[0]?.images?.[0] ||
               relProduct.images?.[0] ||
-              'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80';
+              'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80'
+            );
 
             return (
               <Link
@@ -859,8 +870,13 @@ export default function ProductDetailClient({
                     src={relImage}
                     alt={relProduct.name}
                     fill
+                    unoptimized
                     sizes="(max-width: 768px) 50vw, 25vw"
                     className="object-cover object-center group-hover:scale-105 transition-transform duration-500"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src =
+                        'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80';
+                    }}
                   />
                   <div className="absolute bottom-0 left-0 h-1 w-1/3 bg-[#fef08a] group-hover:w-full transition-all duration-500" />
                 </div>

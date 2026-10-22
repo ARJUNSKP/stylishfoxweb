@@ -1,7 +1,65 @@
 import { Product, ProductColor, productsData } from '@/data/products';
 
-const API_BASE_URL =
+export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api/v1';
+
+/**
+ * Resolves any product image URL to a publicly accessible, renderable image URL.
+ * Automatically translates Cloudflare R2 direct authenticated endpoints (which reject browser GET requests)
+ * to the backend's public proxy endpoint: /api/v1/uploads/file/:folder/:fileName
+ */
+export function formatProductImageUrl(
+  url?: string | null,
+  fallback: string = 'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80'
+): string {
+  if (!url || typeof url !== 'string' || !url.trim()) {
+    return fallback;
+  }
+
+  const trimmed = url.trim();
+
+  // Local client-side preview blob or base64 data URLs
+  if (trimmed.startsWith('blob:') || trimmed.startsWith('data:')) {
+    return trimmed;
+  }
+
+  // Cloudflare R2 direct endpoint:
+  // e.g. https://f06f6904431659b5d0b65af25ca48605.r2.cloudflarestorage.com/products/1792610613515-84506032.png
+  // Needs to be routed through backend public streaming endpoint:
+  // http://localhost:8001/api/v1/uploads/file/products/1792610613515-84506032.png
+  if (trimmed.includes('.r2.cloudflarestorage.com/')) {
+    const parts = trimmed.split('.r2.cloudflarestorage.com/');
+    if (parts[1]) {
+      let key = parts[1].replace(/^\/+/, '');
+      if (key.startsWith('stylishfox-images/')) {
+        key = key.replace(/^stylishfox-images\//, '');
+      }
+      return `${API_BASE_URL}/uploads/file/${key}`;
+    }
+  }
+
+  // If already relative uploads route
+  if (trimmed.startsWith('/api/v1/uploads/file/')) {
+    const origin = API_BASE_URL.replace(/\/api\/v1\/?$/, '');
+    return `${origin}${trimmed}`;
+  }
+  if (trimmed.startsWith('/uploads/file/')) {
+    return `${API_BASE_URL}${trimmed}`;
+  }
+
+  // If stored as pure key e.g. "products/1792610613515.png"
+  if (
+    trimmed.startsWith('products/') ||
+    trimmed.startsWith('avatars/') ||
+    trimmed.startsWith('categories/') ||
+    trimmed.startsWith('banners/') ||
+    trimmed.startsWith('carousels/')
+  ) {
+    return `${API_BASE_URL}/uploads/file/${trimmed}`;
+  }
+
+  return trimmed;
+}
 
 /**
  * Transforms backend API product format into the frontend Product interface
@@ -29,7 +87,7 @@ export function transformBackendProduct(
 
     const cName = v.color?.name || 'Standard';
     const cHex = v.color?.hexCode || '#0d0d0d';
-    const vImages =
+    const rawVariantImages =
       Array.isArray(v.images) && v.images.length > 0
         ? v.images
         : Array.isArray(raw.images) && raw.images.length > 0
@@ -37,6 +95,8 @@ export function transformBackendProduct(
         : [
             'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80',
           ];
+
+    const vImages = rawVariantImages.map((img: string) => formatProductImageUrl(img));
 
     if (!colorMap.has(cName)) {
       colorMap.set(cName, {
@@ -58,12 +118,13 @@ export function transformBackendProduct(
   // Fallback colors if no variant colors
   let colors = Array.from(colorMap.values());
   if (colors.length === 0) {
-    const rawImages =
+    const rawImagesList =
       Array.isArray(raw.images) && raw.images.length > 0
         ? raw.images
         : [
             'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80',
           ];
+    const rawImages = rawImagesList.map((img: string) => formatProductImageUrl(img));
     colors = [
       {
         name: 'Obsidian Black',
@@ -156,8 +217,15 @@ export function transformBackendProduct(
     features: Array.isArray(raw.features) ? raw.features : [],
     colors,
     sizes,
-    images: Array.isArray(raw.images) ? raw.images : [],
-    variants,
+    images: Array.isArray(raw.images)
+      ? raw.images.map((img: string) => formatProductImageUrl(img))
+      : [],
+    variants: variants.map((v: any) => ({
+      ...v,
+      images: Array.isArray(v.images)
+        ? v.images.map((img: string) => formatProductImageUrl(img))
+        : [],
+    })),
     categoryId: raw.categoryId || null,
     category: categoryObj,
     categoryName,
@@ -737,43 +805,50 @@ export async function createAdminSize(
 }
 
 /**
- * Create a new product with variant
+ * Create a new product with variant (supports both FormData for file uploads and JSON)
  */
 export async function createAdminProduct(
   token: string,
-  data: {
-    name: string;
-    slug?: string;
-    tagline?: string;
-    description?: string;
-    features?: string[];
-    categoryId?: string;
-    price?: number | string;
-    sellingPrice?: number | string;
-    stock?: number;
-    sku?: string;
-    images?: string[];
-    colorId?: string;
-    sizeId?: string;
-    variants?: Array<{
-      price?: number | string;
-      sellingPrice?: number | string;
-      stock?: number;
-      sku?: string;
-      colorId?: string;
-      sizeId?: string;
-      images?: string[];
-    }>;
-  }
+  data:
+    | FormData
+    | {
+        name: string;
+        slug?: string;
+        tagline?: string;
+        description?: string;
+        features?: string[];
+        categoryId?: string;
+        price?: number | string;
+        sellingPrice?: number | string;
+        stock?: number;
+        sku?: string;
+        images?: string[];
+        colorId?: string;
+        sizeId?: string;
+        variants?: Array<{
+          price?: number | string;
+          sellingPrice?: number | string;
+          stock?: number;
+          sku?: string;
+          colorId?: string;
+          sizeId?: string;
+          images?: string[];
+        }>;
+      }
 ) {
   try {
+    const isFormData = typeof FormData !== 'undefined' && data instanceof FormData;
     const res = await fetch(`${API_BASE_URL}/products`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(data),
+      headers: isFormData
+        ? {
+            Authorization: `Bearer ${token}`,
+          }
+        : {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+      body: isFormData ? data : JSON.stringify(data),
     });
     const json = await res.json().catch(() => ({}));
     if (res.ok) {
@@ -786,29 +861,36 @@ export async function createAdminProduct(
 }
 
 /**
- * Add a single variant to an existing product
+ * Add a single variant to an existing product (supports both FormData for file uploads and JSON)
  */
 export async function addAdminVariant(
   token: string,
   productId: string,
-  variant: {
-    price?: number | string;
-    sellingPrice?: number | string;
-    stock?: number;
-    colorId?: string;
-    sizeId?: string;
-    images?: string[];
-    sku?: string;
-  }
+  variant:
+    | FormData
+    | {
+        price?: number | string;
+        sellingPrice?: number | string;
+        stock?: number;
+        colorId?: string;
+        sizeId?: string;
+        images?: string[];
+        sku?: string;
+      }
 ) {
   try {
+    const isFormData = typeof FormData !== 'undefined' && variant instanceof FormData;
     const res = await fetch(`${API_BASE_URL}/products/${productId}/variants`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(variant),
+      headers: isFormData
+        ? {
+            Authorization: `Bearer ${token}`,
+          }
+        : {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+      body: isFormData ? variant : JSON.stringify(variant),
     });
     const json = await res.json().catch(() => ({}));
     if (res.ok) {
@@ -854,31 +936,38 @@ export async function updateAdminProduct(
 }
 
 /**
- * Update existing product variant details (price, sellingPrice, stock, colorId, sizeId, images, isPublished)
+ * Update existing product variant details (supports both FormData for file uploads and JSON)
  */
 export async function updateAdminVariant(
   token: string,
   variantId: string,
-  data: {
-    price?: number | string;
-    sellingPrice?: number | string;
-    stock?: number;
-    colorId?: string | null;
-    sizeId?: string | null;
-    images?: string[];
-    sku?: string;
-    isPublished?: boolean;
-    published?: boolean;
-  }
+  data:
+    | FormData
+    | {
+        price?: number | string;
+        sellingPrice?: number | string;
+        stock?: number;
+        colorId?: string | null;
+        sizeId?: string | null;
+        images?: string[];
+        sku?: string;
+        isPublished?: boolean;
+        published?: boolean;
+      }
 ) {
   try {
+    const isFormData = typeof FormData !== 'undefined' && data instanceof FormData;
     const res = await fetch(`${API_BASE_URL}/products/variants/${variantId}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(data),
+      headers: isFormData
+        ? {
+            Authorization: `Bearer ${token}`,
+          }
+        : {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+      body: isFormData ? data : JSON.stringify(data),
     });
     const json = await res.json().catch(() => ({}));
     if (res.ok) {
@@ -989,6 +1078,358 @@ export async function fetchAdminUsers(token: string) {
     return [];
   } catch {
     return [];
+  }
+}
+
+/**
+ * Upload an image file directly to Cloudflare R2 via Backend API (multipart/form-data)
+ * Enforces strict 5MB limit and image file type validation.
+ * Returns the public R2 URL to be stored on PostgreSQL product_variants table.
+ */
+export async function uploadImageToR2(
+  token: string,
+  file: File,
+  folder: string = 'products'
+): Promise<{ ok: boolean; status: number; url?: string; key?: string; message?: string }> {
+  const MAX_SIZE = 5 * 1024 * 1024; // 5 MB limit
+  if (file.size > MAX_SIZE) {
+    return {
+      ok: false,
+      status: 400,
+      message: `File "${file.name}" exceeds the maximum 5 MB limit (${(file.size / (1024 * 1024)).toFixed(2)} MB). Please select an image under 5 MB.`,
+    };
+  }
+
+  if (file.type && !file.type.startsWith('image/')) {
+    return {
+      ok: false,
+      status: 400,
+      message: `File "${file.name}" is not a valid image format. Only image uploads are allowed.`,
+    };
+  }
+
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('folder', folder);
+
+    const res = await fetch(`${API_BASE_URL}/uploads/direct`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    });
+
+    const json = await res.json().catch(() => ({}));
+
+    if (!res.ok || !json.success) {
+      return {
+        ok: false,
+        status: res.status,
+        message: json.message || 'Failed to upload image to Cloudflare R2',
+      };
+    }
+
+    const item = Array.isArray(json.data) ? json.data[0] : json.data;
+    const url = item?.url || '';
+    const key = item?.key || '';
+
+    return {
+      ok: true,
+      status: res.status,
+      url,
+      key,
+      message: json.message || 'Image uploaded successfully to Cloudflare R2',
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      message: err.message || 'Network error while uploading image to Cloudflare R2',
+    };
+  }
+}
+
+/**
+ * Delete an image from a product and Cloudflare R2 (Admin only)
+ */
+export async function deleteAdminProductImage(
+  token: string,
+  productId: string,
+  imageUrl: string
+): Promise<{ ok: boolean; status: number; message?: string }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/products/${productId}/images`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ imageUrl }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.ok) {
+      clearApiCache();
+    }
+    return {
+      ok: res.ok,
+      status: res.status,
+      message: json.message || (res.ok ? 'Image deleted successfully' : 'Failed to delete image'),
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      message: err.message || 'Network error deleting image',
+    };
+  }
+}
+
+/**
+ * Delete an image from a specific variant and Cloudflare R2 (Admin only)
+ */
+export async function deleteAdminVariantImage(
+  token: string,
+  variantId: string,
+  imageUrl: string
+): Promise<{ ok: boolean; status: number; message?: string }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/products/variants/${variantId}/images`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ imageUrl }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.ok) {
+      clearApiCache();
+    }
+    return {
+      ok: res.ok,
+      status: res.status,
+      message: json.message || (res.ok ? 'Image deleted successfully' : 'Failed to delete image'),
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      message: err.message || 'Network error deleting variant image',
+    };
+  }
+}
+
+/**
+ * Directly delete a file from Cloudflare R2 (Admin only)
+ */
+export async function deleteImageFromR2(
+  token: string,
+  keyOrUrl: string
+): Promise<{ ok: boolean; status: number; message?: string }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/uploads`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ url: keyOrUrl }),
+    });
+    const json = await res.json().catch(() => ({}));
+    return {
+      ok: res.ok,
+      status: res.status,
+      message: json.message || (res.ok ? 'File purged from Cloudflare R2' : 'Failed to delete file from R2'),
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      message: err.message || 'Network error deleting file from R2',
+    };
+  }
+}
+
+export interface CarouselItem {
+  id: string;
+  title: string;
+  description?: string | null;
+  images: string[];
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/**
+ * Fetch all carousels (Admin or customer)
+ */
+export async function fetchCarousels(): Promise<CarouselItem[]> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/carousels`, {
+      cache: 'no-store',
+    });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return Array.isArray(json.data) ? json.data : [];
+  } catch {
+    return [];
+  }
+}
+
+let activeCarouselPromise: Promise<CarouselItem | null> | null = null;
+let activeCarouselCached: { data: CarouselItem | null; timestamp: number } | null = null;
+const ACTIVE_CAROUSEL_TTL = 30000; // 30 seconds cache
+
+/**
+ * Fetch the currently active carousel for customer Hero banner.
+ * Uses request de-duplication and memory caching to prevent multiple concurrent calls.
+ */
+export async function fetchActiveCarousel(bypassCache = false): Promise<CarouselItem | null> {
+  const now = Date.now();
+  if (!bypassCache && activeCarouselCached && (now - activeCarouselCached.timestamp < ACTIVE_CAROUSEL_TTL)) {
+    return activeCarouselCached.data;
+  }
+
+  if (activeCarouselPromise) {
+    return activeCarouselPromise;
+  }
+
+  activeCarouselPromise = (async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/carousels/active`, {
+        next: { revalidate: 10 },
+      });
+      if (!res.ok) {
+        activeCarouselCached = { data: null, timestamp: Date.now() };
+        return null;
+      }
+      const json = await res.json();
+      const result = json.data || null;
+      activeCarouselCached = { data: result, timestamp: Date.now() };
+      return result;
+    } catch {
+      return null;
+    } finally {
+      activeCarouselPromise = null;
+    }
+  })();
+
+  return activeCarouselPromise;
+}
+
+/**
+ * Create a new carousel with title, description, images array and/or files (Admin only)
+ */
+export async function createAdminCarousel(
+  token: string,
+  payload: {
+    title: string;
+    description?: string;
+    isActive?: boolean;
+    images?: string[];
+    files?: File[];
+  }
+): Promise<{ ok: boolean; status: number; message?: string; data?: CarouselItem }> {
+  try {
+    const formData = new FormData();
+    formData.append('title', payload.title);
+    if (payload.description) formData.append('description', payload.description);
+    formData.append('isActive', payload.isActive ? 'true' : 'false');
+
+    if (payload.images && payload.images.length > 0) {
+      for (const img of payload.images) {
+        formData.append('images', img);
+      }
+    }
+
+    if (payload.files && payload.files.length > 0) {
+      for (const file of payload.files) {
+        formData.append('files', file);
+      }
+    }
+
+    const res = await fetch(`${API_BASE_URL}/carousels`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    });
+
+    const json = await res.json().catch(() => ({}));
+    return {
+      ok: res.ok,
+      status: res.status,
+      message: json.message || (res.ok ? 'Carousel saved successfully' : 'Failed to save carousel'),
+      data: json.data,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      message: err.message || 'Network error while creating carousel',
+    };
+  }
+}
+
+/**
+ * Activate a carousel as the store banner (Admin only)
+ */
+export async function activateAdminCarousel(
+  token: string,
+  id: string
+): Promise<{ ok: boolean; status: number; message?: string; data?: CarouselItem }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/carousels/${id}/activate`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const json = await res.json().catch(() => ({}));
+    return {
+      ok: res.ok,
+      status: res.status,
+      message: json.message || (res.ok ? 'Carousel activated successfully' : 'Failed to activate carousel'),
+      data: json.data,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      message: err.message || 'Network error while activating carousel',
+    };
+  }
+}
+
+/**
+ * Delete a carousel (Admin only)
+ */
+export async function deleteAdminCarousel(
+  token: string,
+  id: string
+): Promise<{ ok: boolean; status: number; message?: string }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/carousels/${id}`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const json = await res.json().catch(() => ({}));
+    return {
+      ok: res.ok,
+      status: res.status,
+      message: json.message || (res.ok ? 'Carousel deleted successfully' : 'Failed to delete carousel'),
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      message: err.message || 'Network error while deleting carousel',
+    };
   }
 }
 

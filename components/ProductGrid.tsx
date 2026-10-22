@@ -7,7 +7,7 @@ import { ShoppingBag, Eye, MessageCircle } from 'lucide-react';
 import { Product, getAllProducts } from '@/data/products';
 import { useCart } from '@/context/CartContext';
 import { useProfile } from '@/context/ProfileContext';
-import { fetchProducts } from '@/utils/api';
+import { fetchProducts, formatProductImageUrl } from '@/utils/api';
 import { createWhatsAppRebookUrl } from '@/utils/whatsapp';
 
 interface ProductGridProps {
@@ -92,10 +92,11 @@ export default function ProductGrid({ initialProducts, products: controlledProdu
       {products.map((product, index) => {
         // Make every 5th item featured
         const isFeatured = (index + 1) % 5 === 0;
-        const mainImage =
+        const mainImage = formatProductImageUrl(
           product.colors?.[0]?.images?.[0] ||
           product.images?.[0] ||
-          'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80';
+          'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80'
+        );
 
         const productHref = `/product/${product.id}`;
         const isOutOfStock = product.stock !== undefined && product.stock <= 0;
@@ -141,10 +142,15 @@ export default function ProductGrid({ initialProducts, products: controlledProdu
                 src={mainImage}
                 alt={product.name}
                 fill
+                unoptimized
                 sizes="(max-width: 768px) 50vw, (max-width: 1200px) 25vw, 25vw"
                 className={`object-cover object-center group-hover:scale-105 transition-transform duration-500 ${
                   isOutOfStock ? 'opacity-75 grayscale-[20%]' : ''
                 }`}
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src =
+                    'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80';
+                }}
               />
 
               {/* Hover quick preview pill */}
