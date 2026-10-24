@@ -18,6 +18,7 @@ import {
 import { Product, getAllProducts } from '@/data/products';
 import { useCart } from '@/context/CartContext';
 import { useProfile } from '@/context/ProfileContext';
+import { useSettings } from '@/context/SettingsContext';
 import { createWhatsAppOrderUrl, createWhatsAppRebookUrl } from '@/utils/whatsapp';
 import { fetchRelatedProducts, formatProductImageUrl } from '@/utils/api';
 
@@ -31,6 +32,7 @@ export default function ProductDetailClient({
   initialRelatedProducts,
 }: Props) {
   const { addToCart } = useCart();
+  const { settings } = useSettings();
   const {
     profile,
     addresses,
@@ -63,18 +65,18 @@ export default function ProductDetailClient({
       ? product.images
       : ['https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80'];
 
+  const hasColors = Boolean(product.colors && product.colors.length > 0);
   const fallbackColor = {
-    name: 'Standard Edition',
-    hex: '#0d0d0d',
+    name: '',
+    hex: '',
     images: fallbackImages,
   };
 
   // State for selected color variation
   const [selectedColorIndex, setSelectedColorIndex] = useState(0);
-  const activeColor =
-    product.colors && product.colors.length > 0
-      ? product.colors[selectedColorIndex] || product.colors[0]
-      : fallbackColor;
+  const activeColor = hasColors
+    ? product.colors[selectedColorIndex] || product.colors[0]
+    : fallbackColor;
 
   // State for size selection
   const availableSizes =
@@ -204,6 +206,18 @@ export default function ProductDetailClient({
     return st <= 0;
   };
 
+  // Auto-switch to an in-stock size if currently selected size is out of stock
+  useEffect(() => {
+    if (publishedVariants.length === 0 || !product.sizes || product.sizes.length === 0) return;
+
+    if (isSizeOutOfStock(selectedSize)) {
+      const inStockSize = product.sizes.find((s) => !isSizeOutOfStock(s));
+      if (inStockSize) {
+        setSelectedSize(inStockSize);
+      }
+    }
+  }, [activeColor.name, publishedVariants, product.sizes]);
+
   // Dynamic Pricing: Variant-based prices for the selected color & size
   const { activeUnitPrice, strikeUnitPrice, discountPercent, hasSellingPrice } = useMemo(() => {
     let regularPrice = product.price || 0;
@@ -275,6 +289,7 @@ export default function ProductDetailClient({
         whatsappNumber: profile.whatsappNumber || profile.contactNumber,
         email: profile.email,
       },
+      whatsappNumber: settings?.whatsappNumber,
     });
 
     if (typeof window !== 'undefined') {
@@ -301,7 +316,9 @@ export default function ProductDetailClient({
       return;
     }
     const selectedAddress = addresses.find((a) => a.id === selectedAddressId) || addresses[0];
-    const instantShipping = itemTotalAmount > 1999 ? 0 : 149;
+    const freeShippingThreshold = Number(settings?.freeShippingThreshold) || 2000;
+    const shippingFee = Number(settings?.shippingFee) || 149;
+    const instantShipping = itemTotalAmount >= freeShippingThreshold ? 0 : shippingFee;
     const instantFinalAmount = itemTotalAmount + instantShipping;
 
     const url = createWhatsAppOrderUrl({
@@ -336,6 +353,7 @@ export default function ProductDetailClient({
             tag: selectedAddress.tag,
           }
         : undefined,
+      whatsappNumber: settings?.whatsappNumber,
     });
 
     if (typeof window !== 'undefined') {
@@ -500,8 +518,16 @@ export default function ProductDetailClient({
               {currentVariant && (
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
                   <span className="text-[11px] text-zinc-400">
-                    Selected: <strong className="text-white">{activeColor.name}</strong> • Size{' '}
-                    <strong className="text-white">{selectedSize}</strong>
+                    {hasColors && activeColor.name ? (
+                      <>
+                        Selected: <strong className="text-white">{activeColor.name}</strong> • Size{' '}
+                        <strong className="text-white">{selectedSize}</strong>
+                      </>
+                    ) : (
+                      <>
+                        Selected Size: <strong className="text-white">{selectedSize}</strong>
+                      </>
+                    )}
                   </span>
                   {currentVariant.sku && (
                     <span className="text-[10px] font-mono text-zinc-400 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">
@@ -513,43 +539,45 @@ export default function ProductDetailClient({
             </div>
           </div>
 
-          {/* Color Variation Selector */}
-          <div className="py-4 sm:py-5 border-b border-zinc-800">
-            <div className="flex items-center justify-between mb-2.5 sm:mb-3">
-              <span className="text-[11px] sm:text-xs uppercase font-bold text-zinc-400 tracking-wider">
-                Select Color: <strong className="text-white ml-1">{activeColor.name}</strong>
-              </span>
-            </div>
+          {/* Color Variation Selector (hidden if product has no colors) */}
+          {hasColors && product.colors.length > 0 && (
+            <div className="py-4 sm:py-5 border-b border-zinc-800">
+              <div className="flex items-center justify-between mb-2.5 sm:mb-3">
+                <span className="text-[11px] sm:text-xs uppercase font-bold text-zinc-400 tracking-wider">
+                  Select Color: <strong className="text-white ml-1">{activeColor.name}</strong>
+                </span>
+              </div>
 
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              {product.colors.map((color, index) => {
-                const isSelected = index === selectedColorIndex;
-                return (
-                  <button
-                    key={color.name}
-                    type="button"
-                    onClick={() => handleColorChange(index)}
-                    className={`group relative flex items-center gap-2 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg border transition-all cursor-pointer ${
-                      isSelected
-                        ? 'border-[#fef08a] bg-zinc-900 shadow-md ring-1 ring-[#fef08a]'
-                        : 'border-zinc-800 bg-zinc-950 hover:border-zinc-700'
-                    }`}
-                  >
-                    <span
-                      className="w-3.5 sm:w-4 h-3.5 sm:h-4 rounded-full border border-zinc-600 shadow-inner shrink-0"
-                      style={{ backgroundColor: color.hex }}
-                    />
-                    <span className="text-[11px] sm:text-xs font-bold text-zinc-200 group-hover:text-white">
-                      {color.name}
-                    </span>
-                    {isSelected && (
-                      <Check className="w-3.5 h-3.5 text-[#fef08a] ml-0.5" />
-                    )}
-                  </button>
-                );
-              })}
+              <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                {product.colors.map((color, index) => {
+                  const isSelected = index === selectedColorIndex;
+                  return (
+                    <button
+                      key={color.name}
+                      type="button"
+                      onClick={() => handleColorChange(index)}
+                      className={`group relative flex items-center gap-2 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg border transition-all cursor-pointer ${
+                        isSelected
+                          ? 'border-[#fef08a] bg-zinc-900 shadow-md ring-1 ring-[#fef08a]'
+                          : 'border-zinc-800 bg-zinc-950 hover:border-zinc-700'
+                      }`}
+                    >
+                      <span
+                        className="w-3.5 sm:w-4 h-3.5 sm:h-4 rounded-full border border-zinc-600 shadow-inner shrink-0"
+                        style={{ backgroundColor: color.hex }}
+                      />
+                      <span className="text-[11px] sm:text-xs font-bold text-zinc-200 group-hover:text-white">
+                        {color.name}
+                      </span>
+                      {isSelected && (
+                        <Check className="w-3.5 h-3.5 text-[#fef08a] ml-0.5" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Size Selector */}
           <div className="py-4 sm:py-5 border-b border-zinc-800">
@@ -591,21 +619,24 @@ export default function ProductDetailClient({
                   <button
                     key={size}
                     type="button"
-                    onClick={() => setSelectedSize(size)}
-                    className={`py-2 sm:py-2.5 rounded text-[11px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer border flex flex-col items-center justify-center ${
-                      isSelected
-                        ? sizeOutOfStock
-                          ? 'bg-red-500/20 text-red-300 border-red-500 ring-1 ring-red-500'
-                          : 'bg-[#fef08a] text-black border-[#fef08a] shadow-lg shadow-yellow-500/10'
-                        : sizeOutOfStock
-                        ? 'bg-zinc-950/70 text-zinc-500 border-zinc-800/80 hover:border-zinc-700'
-                        : 'bg-zinc-900/80 text-zinc-300 border-zinc-800 hover:border-zinc-600 hover:text-white'
+                    disabled={sizeOutOfStock}
+                    onClick={() => {
+                      if (!sizeOutOfStock) {
+                        setSelectedSize(size);
+                      }
+                    }}
+                    className={`py-2 sm:py-2.5 rounded text-[11px] sm:text-xs font-black uppercase tracking-wider transition-all border flex flex-col items-center justify-center relative overflow-hidden select-none ${
+                      sizeOutOfStock
+                        ? 'opacity-40 cursor-not-allowed bg-zinc-950/90 text-zinc-600 border-zinc-800/60 pointer-events-none'
+                        : isSelected
+                        ? 'bg-[#fef08a] text-black border-[#fef08a] shadow-lg shadow-yellow-500/10 cursor-pointer'
+                        : 'bg-zinc-900/80 text-zinc-300 border-zinc-800 hover:border-zinc-600 hover:text-white cursor-pointer'
                     }`}
                   >
-                    <span>{size}</span>
+                    <span className={sizeOutOfStock ? 'line-through text-zinc-500' : ''}>{size}</span>
                     {sizeOutOfStock ? (
-                      <span className="text-[8px] font-bold text-red-400 mt-0.5 tracking-tight leading-none">
-                        Out of stock
+                      <span className="text-[7.5px] font-bold text-red-500/80 mt-0.5 tracking-tight leading-none uppercase">
+                        Sold Out
                       </span>
                     ) : sizeEffectivePrice && sizeEffectivePrice > 0 ? (
                       <span
@@ -824,7 +855,7 @@ export default function ProductDetailClient({
                 Shipping & Returns
               </h3>
               <p className="text-xs text-zinc-400 leading-relaxed">
-                Dispatched within 24 hours. Free express shipping across India on orders above ₹1,999. Easy 7-day doorstep size replacement and exchanges available.
+                Dispatched within 24 hours. Free express shipping across India on orders above ₹{(Number(settings?.freeShippingThreshold) || 2000).toLocaleString()}. Easy 7-day doorstep size replacement and exchanges available.
               </p>
             </div>
           </div>

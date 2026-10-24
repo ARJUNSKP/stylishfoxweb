@@ -7,6 +7,7 @@ import { ShoppingBag, Eye, MessageCircle } from 'lucide-react';
 import { Product, getAllProducts } from '@/data/products';
 import { useCart } from '@/context/CartContext';
 import { useProfile } from '@/context/ProfileContext';
+import { useSettings } from '@/context/SettingsContext';
 import { fetchProducts, formatProductImageUrl } from '@/utils/api';
 import { createWhatsAppRebookUrl } from '@/utils/whatsapp';
 
@@ -21,6 +22,7 @@ export default function ProductGrid({ initialProducts, products: controlledProdu
   );
   const { addToCart } = useCart();
   const { profile, requireWhatsAppPrerequisites } = useProfile();
+  const { settings } = useSettings();
 
   useEffect(() => {
     if (controlledProducts !== undefined) return;
@@ -80,6 +82,7 @@ export default function ProductGrid({ initialProducts, products: controlledProdu
         whatsappNumber: profile?.whatsappNumber || profile?.contactNumber,
         email: profile?.email,
       },
+      whatsappNumber: settings?.whatsappNumber,
     });
 
     if (typeof window !== 'undefined') {

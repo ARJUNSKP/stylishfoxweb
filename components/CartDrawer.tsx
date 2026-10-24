@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { X, Plus, Minus, Trash2, ShoppingBag, ShieldCheck, Sparkles, MessageCircle, AlertCircle } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 import { useProfile } from '@/context/ProfileContext';
+import { useSettings } from '@/context/SettingsContext';
 import { createWhatsAppOrderUrl } from '@/utils/whatsapp';
 import { formatProductImageUrl } from '@/utils/api';
 
@@ -20,7 +21,9 @@ export default function CartDrawer() {
     shipping,
     grandTotal,
     totalCount,
+    freeShippingThreshold: cartFreeShippingThreshold,
   } = useCart();
+  const { settings } = useSettings();
 
   const {
     profile,
@@ -69,6 +72,7 @@ export default function CartDrawer() {
           tag: selectedAddress.tag,
         }
       : undefined,
+    whatsappNumber: settings?.whatsappNumber,
   });
 
   const handleCheckoutWhatsApp = (e: React.MouseEvent) => {
@@ -81,7 +85,7 @@ export default function CartDrawer() {
     }
   };
 
-  const freeShippingThreshold = 2000;
+  const freeShippingThreshold = cartFreeShippingThreshold || Number(settings?.freeShippingThreshold) || 2000;
   const progressToFreeShipping = Math.min(100, Math.round((subtotal / freeShippingThreshold) * 100));
   const amountNeededForFreeShipping = Math.max(0, freeShippingThreshold - subtotal);
 

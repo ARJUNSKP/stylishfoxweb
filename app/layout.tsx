@@ -7,6 +7,8 @@ import { ProfileProvider } from "@/context/ProfileContext";
 import ProfileDrawer from "@/components/ProfileDrawer";
 import AuthModal from "@/components/AuthModal";
 
+import { SettingsProvider } from "@/context/SettingsContext";
+
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -30,14 +32,16 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body className="bg-black text-white antialiased selection:bg-[#fef08a] selection:text-black">
-        <ProfileProvider>
-          <CartProvider>
-            {children}
-            <CartDrawer />
-            <ProfileDrawer />
-            <AuthModal />
-          </CartProvider>
-        </ProfileProvider>
+        <SettingsProvider>
+          <ProfileProvider>
+            <CartProvider>
+              {children}
+              <CartDrawer />
+              <ProfileDrawer />
+              <AuthModal />
+            </CartProvider>
+          </ProfileProvider>
+        </SettingsProvider>
       </body>
     </html>
   );

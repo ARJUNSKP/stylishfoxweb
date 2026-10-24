@@ -3,9 +3,15 @@
 import React from 'react';
 import { MessageCircle } from 'lucide-react';
 import { DEFAULT_STORE_WHATSAPP } from '@/utils/whatsapp';
+import { useSettings } from '@/context/SettingsContext';
 
 export default function FloatingIcons() {
-  const whatsappNumber = (process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || DEFAULT_STORE_WHATSAPP).replace(/[^0-9]/g, '');
+  const { settings } = useSettings();
+  const whatsappNumber = (
+    settings?.whatsappNumber ||
+    process.env.NEXT_PUBLIC_WHATSAPP_NUMBER ||
+    DEFAULT_STORE_WHATSAPP
+  ).replace(/[^0-9]/g, '');
   const enquiryUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(
     'Hello Stylish Fox Team, I have an inquiry regarding your heavyweight t-shirt collection.'
   )}`;

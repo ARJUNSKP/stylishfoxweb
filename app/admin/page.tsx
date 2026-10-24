@@ -33,6 +33,8 @@ import {
   UploadCloud,
   Sliders,
   ImageIcon,
+  ChevronDown,
+  Settings,
 } from 'lucide-react';
 import { useProfile } from '@/context/ProfileContext';
 import InvoiceModal from '@/components/InvoiceModal';
@@ -52,6 +54,8 @@ import {
   addAdminVariant,
   updateAdminProduct,
   updateAdminVariant,
+  deleteAdminVariant,
+  deleteAdminProduct,
   deleteAdminProductImage,
   deleteAdminVariantImage,
   deleteImageFromR2,
@@ -61,6 +65,8 @@ import {
   createAdminCarousel,
   activateAdminCarousel,
   deleteAdminCarousel,
+  fetchStoreSettings,
+  updateAdminStoreSettings,
   CarouselItem,
   API_BASE_URL,
 } from '@/utils/api';
@@ -102,6 +108,190 @@ interface StagedVariant {
   imageFiles?: File[];
 }
 
+interface SearchableSelectOption {
+  value: string;
+  label: string;
+  sublabel?: string;
+  hexCode?: string;
+  code?: string;
+}
+
+interface SearchableSelectProps {
+  options: SearchableSelectOption[];
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  searchPlaceholder?: string;
+  className?: string;
+  disabled?: boolean;
+}
+
+function SearchableSelect({
+  options,
+  value,
+  onChange,
+  placeholder = 'Select...',
+  searchPlaceholder = 'Type to search...',
+  className = '',
+  disabled = false,
+}: SearchableSelectProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const containerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen && searchInputRef.current) {
+      setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 50);
+    } else {
+      setQuery('');
+    }
+  }, [isOpen]);
+
+  const selectedOption = useMemo(
+    () => options.find((opt) => opt.value === value),
+    [options, value]
+  );
+
+  const filteredOptions = useMemo(() => {
+    if (!query.trim()) return options;
+    const q = query.toLowerCase().trim();
+    return options.filter(
+      (opt) =>
+        opt.label.toLowerCase().includes(q) ||
+        (opt.sublabel && opt.sublabel.toLowerCase().includes(q)) ||
+        (opt.code && opt.code.toLowerCase().includes(q))
+    );
+  }, [options, query]);
+
+  return (
+    <div className={`relative ${className}`} ref={containerRef}>
+      {/* Trigger Button */}
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setIsOpen((prev) => !prev)}
+        className="w-full px-3.5 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-xs text-left flex items-center justify-between gap-2 hover:border-zinc-700 focus:outline-none focus:border-[#fef08a] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          {selectedOption?.hexCode && (
+            <span
+              className="w-3.5 h-3.5 rounded-full border border-zinc-700 shrink-0"
+              style={{ backgroundColor: selectedOption.hexCode }}
+            />
+          )}
+          {selectedOption?.code && (
+            <span className="px-1.5 py-0.2 rounded bg-zinc-800 border border-zinc-700 text-zinc-300 font-mono text-[10px]">
+              {selectedOption.code}
+            </span>
+          )}
+          <span className={`truncate ${selectedOption ? 'text-white' : 'text-zinc-500'}`}>
+            {selectedOption ? selectedOption.label : placeholder}
+          </span>
+          {selectedOption?.sublabel && (
+            <span className="text-[10px] text-zinc-500 font-mono hidden sm:inline">
+              {selectedOption.sublabel}
+            </span>
+          )}
+        </div>
+        <ChevronDown className={`w-3.5 h-3.5 text-zinc-400 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {/* Dropdown with top search box */}
+      {isOpen && (
+        <div className="absolute left-0 right-0 top-full mt-1.5 bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl p-2 z-[60] flex flex-col gap-1.5 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100">
+          {/* Top Search Input */}
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={searchPlaceholder}
+              className="w-full pl-8 pr-7 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#fef08a]"
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+
+          {/* Options List */}
+          <div className="max-h-48 overflow-y-auto flex flex-col gap-0.5 pr-0.5">
+            {filteredOptions.length === 0 ? (
+              <div className="py-4 text-center text-zinc-500 text-[11px]">
+                No matching results
+              </div>
+            ) : (
+              filteredOptions.map((opt) => {
+                const isSelected = opt.value === value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => {
+                      onChange(opt.value);
+                      setIsOpen(false);
+                    }}
+                    className={`w-full px-2.5 py-1.5 rounded-lg text-xs text-left flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                      isSelected
+                        ? 'bg-[#fef08a] text-black font-bold'
+                        : 'text-zinc-300 hover:bg-zinc-900 hover:text-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      {opt.hexCode && (
+                        <span
+                          className="w-3.5 h-3.5 rounded-full border border-zinc-700 shrink-0"
+                          style={{ backgroundColor: opt.hexCode }}
+                        />
+                      )}
+                      {opt.code && (
+                        <span className={`px-1.5 py-0.2 rounded text-[10px] font-mono ${isSelected ? 'bg-black/10 text-black' : 'bg-zinc-800 text-zinc-300 border border-zinc-700'}`}>
+                          {opt.code}
+                        </span>
+                      )}
+                      <span className="truncate">{opt.label}</span>
+                      {opt.sublabel && (
+                        <span className={`text-[10px] ${isSelected ? 'text-black/70' : 'text-zinc-500'}`}>
+                          {opt.sublabel}
+                        </span>
+                      )}
+                    </div>
+                    {isSelected && <Check className="w-3.5 h-3.5 shrink-0" />}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const emptySubscribe = () => () => {};
 
 export default function AdminDashboardPage() {
@@ -122,8 +312,21 @@ export default function AdminDashboardPage() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const [activeModal, setActiveModal] = useState<
-    'NONE' | 'ADD_PRODUCT' | 'EDIT_VARIANT' | 'CATEGORY' | 'COLORS' | 'SIZE' | 'CAROUSEL' | 'INVOICE'
+    'NONE' | 'ADD_PRODUCT' | 'EDIT_VARIANT' | 'CATEGORY' | 'COLORS' | 'SIZE' | 'CAROUSEL' | 'INVOICE' | 'SETTINGS'
   >('NONE');
+
+  // Store Settings state
+  const [settingsForm, setSettingsForm] = useState<{
+    whatsappNumber: string;
+    freeShippingThreshold: number | string;
+    shippingFee: number | string;
+  }>({
+    whatsappNumber: '918086388058',
+    freeShippingThreshold: 2000,
+    shippingFee: 149,
+  });
+  const [isLoadingSettings, setIsLoadingSettings] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
 
   // Backend metadata lists
   const [rawCategories, setRawCategories] = useState<{ id: string; name: string; slug: string; description?: string }[]>([]);
@@ -173,6 +376,31 @@ export default function AdminDashboardPage() {
   const [carouselToDelete, setCarouselToDelete] = useState<CarouselItem | null>(null);
   // Active carousel delete attempt warning modal state
   const [activeCarouselWarning, setActiveCarouselWarning] = useState<CarouselItem | null>(null);
+
+  // Variant delete confirmation modal state
+  const [variantToDelete, setVariantToDelete] = useState<{
+    variantId: string;
+    productName: string;
+    colorName?: string;
+    colorHex?: string;
+    sizeCode?: string;
+    price?: number;
+    sellingPrice?: number;
+    image?: string;
+    isOnlyVariant?: boolean;
+    productId?: string;
+  } | null>(null);
+  const [isDeletingVariant, setIsDeletingVariant] = useState(false);
+
+  // Product delete confirmation modal state
+  const [productToDelete, setProductToDelete] = useState<{
+    productId: string;
+    productName: string;
+    categoryName?: string;
+    variantCount?: number;
+    image?: string;
+  } | null>(null);
+  const [isDeletingProduct, setIsDeletingProduct] = useState(false);
 
   // Forms
   const [productForm, setProductForm] = useState<{
@@ -573,8 +801,34 @@ export default function AdminDashboardPage() {
       return;
     }
 
-    if (!variantForm.price || isNaN(parseFloat(variantForm.price))) {
-      setModalFeedback({ type: 'error', text: 'Please enter a valid regular price.' });
+    if (!variantForm.colorId) {
+      setModalFeedback({ type: 'error', text: 'Please select a Color for this variant. Color is required.' });
+      return;
+    }
+
+    if (!variantForm.price || isNaN(parseFloat(variantForm.price)) || parseFloat(variantForm.price) <= 0) {
+      setModalFeedback({ type: 'error', text: 'Please enter a valid Regular Price (₹) for this variant. Price is required.' });
+      return;
+    }
+
+    if (!variantForm.sellingPrice || isNaN(parseFloat(variantForm.sellingPrice)) || parseFloat(variantForm.sellingPrice) <= 0) {
+      setModalFeedback({ type: 'error', text: 'Please enter a valid Selling Price (₹) for this variant. Selling price is required.' });
+      return;
+    }
+
+    if (parseFloat(variantForm.sellingPrice) > parseFloat(variantForm.price)) {
+      setModalFeedback({ type: 'error', text: 'Selling Price cannot be greater than Regular Price.' });
+      return;
+    }
+
+    if (!variantForm.stock || isNaN(parseInt(variantForm.stock, 10)) || parseInt(variantForm.stock, 10) < 0) {
+      setModalFeedback({ type: 'error', text: 'Please enter valid Stock Units (0 or more). Stock is required.' });
+      return;
+    }
+
+    const totalVariantImages = variantForm.images.length + variantForm.imageFiles.length;
+    if (totalVariantImages === 0 && !variantForm.imageInput.trim()) {
+      setModalFeedback({ type: 'error', text: 'Please add at least one Image for this variant. Image is required.' });
       return;
     }
 
@@ -900,23 +1154,42 @@ export default function AdminDashboardPage() {
     }, 3000);
 
     if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  // Stage a variant into the bottom table & clear Part 2 inputs
+  };  // Stage a variant into the bottom table & clear Part 2 inputs
   const handleAddVariantToStaging = (e?: React.MouseEvent) => {
     if (e) e.preventDefault();
-    if (!productForm.price || isNaN(parseFloat(productForm.price)) || parseFloat(productForm.price) <= 0) {
-      setModalFeedback({ type: 'error', text: 'Please enter a valid Price (₹) for this variant.' });
+    if (!productForm.colorId) {
+      setModalFeedback({ type: 'error', text: 'Please select a Color for this variant. Color is required.' });
       return;
     }
-
-    const col = rawColors.find((c) => c.id === productForm.colorId);
-    const sz = rawSizes.find((s) => s.id === productForm.sizeId);
+    if (!productForm.price || isNaN(parseFloat(productForm.price)) || parseFloat(productForm.price) <= 0) {
+      setModalFeedback({ type: 'error', text: 'Please enter a valid Regular Price (₹) for this variant. Price is required.' });
+      return;
+    }
+    if (!productForm.sellingPrice || isNaN(parseFloat(productForm.sellingPrice)) || parseFloat(productForm.sellingPrice) <= 0) {
+      setModalFeedback({ type: 'error', text: 'Please enter a valid Selling Price (₹) for this variant. Selling price is required.' });
+      return;
+    }
+    if (parseFloat(productForm.sellingPrice) > parseFloat(productForm.price)) {
+      setModalFeedback({ type: 'error', text: 'Selling Price cannot be greater than Regular Price.' });
+      return;
+    }
+    if (!productForm.stock || isNaN(parseInt(productForm.stock, 10)) || parseInt(productForm.stock, 10) < 0) {
+      setModalFeedback({ type: 'error', text: 'Please enter valid Stock Units (0 or more) for this variant. Stock is required.' });
+      return;
+    }
 
     const finalImages = [...productForm.images];
     if (productForm.imageInput.trim() && !finalImages.includes(productForm.imageInput.trim())) {
       finalImages.push(productForm.imageInput.trim());
     }
+
+    if (finalImages.length === 0 && productForm.imageFiles.length === 0) {
+      setModalFeedback({ type: 'error', text: 'Please add at least one Image for this variant. Image is required.' });
+      return;
+    }
+
+    const col = rawColors.find((c) => c.id === productForm.colorId);
+    const sz = rawSizes.find((s) => s.id === productForm.sizeId);
 
     const newVariant: StagedVariant = {
       id: `var-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -927,7 +1200,7 @@ export default function AdminDashboardPage() {
       sizeCode: sz?.code,
       sizeName: sz?.name,
       price: parseFloat(productForm.price) || 0,
-      sellingPrice: productForm.sellingPrice ? parseFloat(productForm.sellingPrice) : undefined,
+      sellingPrice: parseFloat(productForm.sellingPrice),
       stock: parseInt(productForm.stock, 10) || 0,
       images: finalImages,
       imageFiles: [...productForm.imageFiles],
@@ -954,7 +1227,7 @@ export default function AdminDashboardPage() {
     });
     setTimeout(() => {
       setModalFeedback(null);
-    }, 2500);
+    }, 4000);
   };
 
   const handleRemoveStagedVariant = (id: string) => {
@@ -974,12 +1247,19 @@ export default function AdminDashboardPage() {
   const handleAddProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!productForm.name.trim()) {
-      setModalFeedback({ type: 'error', text: 'Product name is required' });
+      setModalFeedback({ type: 'error', text: 'Product name is required.' });
       return;
     }
-    const authToken = getAuthToken();
-    if (!authToken) {
-      setModalFeedback({ type: 'error', text: 'Admin token missing. Please sign in again.' });
+    if (!productForm.tagline.trim()) {
+      setModalFeedback({ type: 'error', text: 'Product tagline is required.' });
+      return;
+    }
+    if (!productForm.categoryId) {
+      setModalFeedback({ type: 'error', text: 'Please select a Category. Category is required.' });
+      return;
+    }
+    if (!productForm.description.trim()) {
+      setModalFeedback({ type: 'error', text: 'Product description is required.' });
       return;
     }
 
@@ -989,15 +1269,53 @@ export default function AdminDashboardPage() {
       finalFeatures.push(productForm.featureInput.trim());
     }
 
+    if (finalFeatures.length === 0) {
+      setModalFeedback({ type: 'error', text: 'Please add at least one Feature for this product. Features are required.' });
+      return;
+    }
+
+    const authToken = getAuthToken();
+    if (!authToken) {
+      setModalFeedback({ type: 'error', text: 'Admin token missing. Please sign in again.' });
+      return;
+    }
+
     // Check variants: if user has pending variant inputs in Part 2 and no variants staged yet, auto-stage it
     let variantsToSubmit = [...stagedVariants];
     if (variantsToSubmit.length === 0 && productForm.price) {
-      const col = rawColors.find((c) => c.id === productForm.colorId);
-      const sz = rawSizes.find((s) => s.id === productForm.sizeId);
+      if (!productForm.colorId) {
+        setModalFeedback({ type: 'error', text: 'Please select a Color for this variant. Color is required.' });
+        return;
+      }
+      if (!productForm.price || isNaN(parseFloat(productForm.price)) || parseFloat(productForm.price) <= 0) {
+        setModalFeedback({ type: 'error', text: 'Please enter a valid Regular Price (₹) for this variant. Price is required.' });
+        return;
+      }
+      if (!productForm.sellingPrice || isNaN(parseFloat(productForm.sellingPrice)) || parseFloat(productForm.sellingPrice) <= 0) {
+        setModalFeedback({ type: 'error', text: 'Please enter a valid Selling Price (₹) for this variant. Selling price is required.' });
+        return;
+      }
+      if (parseFloat(productForm.sellingPrice) > parseFloat(productForm.price)) {
+        setModalFeedback({ type: 'error', text: 'Selling Price cannot be greater than Regular Price.' });
+        return;
+      }
+      if (!productForm.stock || isNaN(parseInt(productForm.stock, 10)) || parseInt(productForm.stock, 10) < 0) {
+        setModalFeedback({ type: 'error', text: 'Please enter valid Stock Units (0 or more) for this variant. Stock is required.' });
+        return;
+      }
+
       const finalImages = [...productForm.images];
       if (productForm.imageInput.trim() && !finalImages.includes(productForm.imageInput.trim())) {
         finalImages.push(productForm.imageInput.trim());
       }
+      if (finalImages.length === 0 && productForm.imageFiles.length === 0) {
+        setModalFeedback({ type: 'error', text: 'Please add at least one Image for this variant. Image is required.' });
+        return;
+      }
+
+      const col = rawColors.find((c) => c.id === productForm.colorId);
+      const sz = rawSizes.find((s) => s.id === productForm.sizeId);
+
       variantsToSubmit.push({
         id: 'auto-1',
         colorId: productForm.colorId || undefined,
@@ -1007,7 +1325,7 @@ export default function AdminDashboardPage() {
         sizeCode: sz?.code,
         sizeName: sz?.name,
         price: parseFloat(productForm.price) || 0,
-        sellingPrice: productForm.sellingPrice ? parseFloat(productForm.sellingPrice) : undefined,
+        sellingPrice: parseFloat(productForm.sellingPrice),
         stock: parseInt(productForm.stock, 10) || 0,
         images: finalImages,
         imageFiles: [...productForm.imageFiles],
@@ -1076,6 +1394,7 @@ export default function AdminDashboardPage() {
             vFormData.append('price', String(v.price));
             if (v.sellingPrice) vFormData.append('sellingPrice', String(v.sellingPrice));
             vFormData.append('stock', String(v.stock));
+            vFormData.append('isPublished', 'false');
 
             // Append existing permanent URLs
             (v.images || [])
@@ -1116,7 +1435,7 @@ export default function AdminDashboardPage() {
         prodFormData.append('features', JSON.stringify(finalFeatures));
       }
 
-      // Build clean variants payload (exclude local blob: URLs)
+      // Build clean variants payload (exclude local blob: URLs) - default to isPublished: false (Archived)
       const variantsPayload = variantsToSubmit.map((v) => ({
         colorId: v.colorId || undefined,
         sizeId: v.sizeId || undefined,
@@ -1124,8 +1443,10 @@ export default function AdminDashboardPage() {
         sellingPrice: v.sellingPrice || undefined,
         stock: v.stock,
         images: (v.images || []).filter((img) => !img.startsWith('blob:')),
+        isPublished: false,
       }));
       prodFormData.append('variants', JSON.stringify(variantsPayload));
+      prodFormData.append('isPublished', 'false');
 
       // Append image files for each variant into FormData
       variantsToSubmit.forEach((v, idx) => {
@@ -1601,6 +1922,126 @@ export default function AdminDashboardPage() {
     }
   };
 
+  // Trigger confirmation modal for deleting a variant
+  const handleRequestDeleteVariant = (row: VariantRowItem) => {
+    if (!row.variantId) {
+      setModalFeedback({ type: 'error', text: 'Variant ID is missing for this item.' });
+      return;
+    }
+    const matchingProduct = products.find((p) => String(p.id) === String(row.product.id));
+    const variantCount = matchingProduct?.variants?.length || 1;
+
+    setVariantToDelete({
+      variantId: row.variantId,
+      productId: String(row.product.id),
+      productName: row.name,
+      colorName: row.colorName,
+      colorHex: row.colorHex,
+      sizeCode: row.sizeCode,
+      price: row.price,
+      sellingPrice: row.sellingPrice,
+      image: row.image,
+      isOnlyVariant: variantCount <= 1,
+    });
+  };
+
+  // Perform variant deletion after confirmation
+  const handleConfirmDeleteVariant = async () => {
+    if (!variantToDelete) return;
+    const { variantId, productName, isOnlyVariant, productId } = variantToDelete;
+    const authToken = getAuthToken();
+    if (!authToken) {
+      setModalFeedback({ type: 'error', text: 'Admin token missing. Please sign in again.' });
+      setVariantToDelete(null);
+      return;
+    }
+
+    setIsDeletingVariant(true);
+    try {
+      const res = await deleteAdminVariant(authToken, variantId);
+      if (res.ok) {
+        // If this was the only variant, also clean up the product so catalog doesn't leave orphaned empty product
+        if (isOnlyVariant && productId) {
+          await deleteAdminProduct(authToken, productId).catch(() => {});
+        }
+
+        setModalFeedback({
+          type: 'success',
+          text: `Variant for "${productName}" deleted successfully and images removed from R2!`,
+        });
+        setVariantToDelete(null);
+        if (activeModal === 'EDIT_VARIANT') {
+          setActiveModal('NONE');
+        }
+        await loadAdminProducts();
+      } else {
+        setModalFeedback({
+          type: 'error',
+          text: res.message || 'Failed to delete variant.',
+        });
+      }
+    } catch (err: any) {
+      setModalFeedback({
+        type: 'error',
+        text: err.message || 'Error deleting variant.',
+      });
+    } finally {
+      setIsDeletingVariant(false);
+    }
+  };
+
+  // Trigger confirmation modal for deleting an entire product
+  const handleRequestDeleteProduct = (product: Product) => {
+    setProductToDelete({
+      productId: String(product.id),
+      productName: product.name,
+      categoryName: product.categoryName || 'General',
+      variantCount: product.variants?.length || 0,
+      image: product.images?.[0] || product.colors?.[0]?.images?.[0],
+    });
+  };
+
+  // Perform product deletion after confirmation
+  const handleConfirmDeleteProduct = async () => {
+    if (!productToDelete) return;
+    const { productId, productName } = productToDelete;
+    const authToken = getAuthToken();
+    if (!authToken) {
+      setModalFeedback({ type: 'error', text: 'Admin token missing. Please sign in again.' });
+      setProductToDelete(null);
+      return;
+    }
+
+    setIsDeletingProduct(true);
+    try {
+      const res = await deleteAdminProduct(authToken, productId);
+      if (res.ok) {
+        setModalFeedback({
+          type: 'success',
+          text: `Product "${productName}" and all associated variants & images deleted successfully!`,
+        });
+        setProductToDelete(null);
+        if (activeModal === 'ADD_PRODUCT' || activeModal === 'EDIT_VARIANT') {
+          setActiveModal('NONE');
+          resetFormState();
+        }
+        await loadAdminProducts();
+      } else {
+        setModalFeedback({
+          type: 'error',
+          text: res.message || 'Failed to delete product.',
+        });
+      }
+    } catch (err: any) {
+      setModalFeedback({
+        type: 'error',
+        text: err.message || 'Error deleting product.',
+      });
+    } finally {
+      setIsDeletingProduct(false);
+    }
+  };
+
   const authorized = isMounted && (isAdmin || user?.role?.toLowerCase() === 'admin');
 
   // Flatten products into variant-based rows for dashboard table
@@ -1973,31 +2414,36 @@ export default function AdminDashboardPage() {
               </div>
 
               {/* Status Filter */}
-              <select
+              <SearchableSelect
+                options={[
+                  { value: 'ALL', label: 'All Status' },
+                  { value: 'IN_STOCK', label: 'In Stock Only' },
+                  { value: 'OUT_OF_STOCK', label: 'Out of Stock (0)' },
+                  { value: 'ARCHIVED', label: 'Archived Only' },
+                ]}
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as any)}
-                className="bg-zinc-900 border border-zinc-800 text-xs text-zinc-300 rounded-lg px-3 py-2 focus:outline-none focus:border-[#fef08a] cursor-pointer"
-              >
-                <option value="ALL">All Status</option>
-                <option value="IN_STOCK">In Stock Only</option>
-                <option value="OUT_OF_STOCK">Out of Stock (0)</option>
-                <option value="ARCHIVED">Archived Only</option>
-              </select>
+                onChange={(val) => setStatusFilter(val as any)}
+                placeholder="All Status"
+                searchPlaceholder="Search status..."
+                className="w-36 sm:w-40"
+              />
 
               {/* Category Filter */}
               {categories.length > 0 && (
-                <select
+                <SearchableSelect
+                  options={[
+                    { value: 'ALL', label: 'All Categories' },
+                    ...categories.map((c) => ({
+                      value: c,
+                      label: c,
+                    })),
+                  ]}
                   value={categoryFilter}
-                  onChange={(e) => setCategoryFilter(e.target.value)}
-                  className="bg-zinc-900 border border-zinc-800 text-xs text-zinc-300 rounded-lg px-3 py-2 focus:outline-none focus:border-[#fef08a] cursor-pointer"
-                >
-                  <option value="ALL">All Categories</option>
-                  {categories.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setCategoryFilter(val)}
+                  placeholder="All Categories"
+                  searchPlaceholder="Search categories..."
+                  className="w-40 sm:w-44"
+                />
               )}
 
               {/* Reload Button */}
@@ -2104,6 +2550,34 @@ export default function AdminDashboardPage() {
                     >
                       <FileText className="w-4 h-4 text-[#fef08a] group-hover:text-black" />
                       <span>Invoice</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setIsMenuOpen(false);
+                        setModalFeedback(null);
+                        setActiveModal('SETTINGS');
+                        setIsLoadingSettings(true);
+                        try {
+                          const data = await fetchStoreSettings();
+                          if (data) {
+                            setSettingsForm({
+                              whatsappNumber: data.whatsappNumber || '918086388058',
+                              freeShippingThreshold: data.freeShippingThreshold !== undefined ? data.freeShippingThreshold : 2000,
+                              shippingFee: data.shippingFee !== undefined ? data.shippingFee : 149,
+                            });
+                          }
+                        } catch (err) {
+                          console.error('Failed to load settings:', err);
+                        } finally {
+                          setIsLoadingSettings(false);
+                        }
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-zinc-200 hover:text-black hover:bg-[#fef08a] transition-colors text-left cursor-pointer group border-t border-zinc-800/80 pt-2"
+                    >
+                      <Settings className="w-4 h-4 text-[#fef08a] group-hover:text-black" />
+                      <span>Settings</span>
                     </button>
                   </div>
                 )}
@@ -2224,7 +2698,7 @@ export default function AdminDashboardPage() {
                               </span>
                             </div>
                           ) : (
-                            <span className="text-zinc-500 text-xs">Standard</span>
+                            <span className="text-zinc-500 text-xs">—</span>
                           )}
                         </td>
 
@@ -2303,7 +2777,7 @@ export default function AdminDashboardPage() {
                           )}
                         </td>
 
-                        {/* 8. Actions: Edit Button + View storefront */}
+                        {/* 8. Actions: Edit Button + Delete Variant Button + View storefront */}
                         <td className="py-3 px-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
                             <button
@@ -2314,6 +2788,15 @@ export default function AdminDashboardPage() {
                             >
                               <Pencil className="w-3.5 h-3.5 text-zinc-400 group-hover/btn:text-black transition-colors" />
                               <span>Edit</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleRequestDeleteVariant(row)}
+                              className="p-1.5 rounded-lg bg-zinc-900 hover:bg-red-500/20 hover:text-red-400 border border-zinc-800 text-zinc-400 transition-colors cursor-pointer"
+                              title={`Delete variant (${row.sizeCode || 'Free Size'}${row.colorName ? ` • ${row.colorName}` : ''})`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
 
                             <Link
@@ -2377,6 +2860,11 @@ export default function AdminDashboardPage() {
                     <Sliders className="w-4 h-4" />
                   </div>
                 )}
+                {activeModal === 'SETTINGS' && (
+                  <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-[#fef08a]">
+                    <Settings className="w-4 h-4" />
+                  </div>
+                )}
                 <div>
                   <h3 className="text-sm font-black uppercase tracking-wider text-white">
                     {activeModal === 'ADD_PRODUCT' && (productForm.isEditing ? 'Edit Product & Variant' : 'Add New Product')}
@@ -2385,6 +2873,7 @@ export default function AdminDashboardPage() {
                     {activeModal === 'COLORS' && 'Color Palette Management'}
                     {activeModal === 'SIZE' && 'Size Scale Management'}
                     {activeModal === 'CAROUSEL' && 'Store Banner Carousel Management'}
+                    {activeModal === 'SETTINGS' && 'Store Settings & Operations'}
                   </h3>
                   <p className="text-[11px] text-zinc-400">
                     {activeModal === 'ADD_PRODUCT' &&
@@ -2396,6 +2885,7 @@ export default function AdminDashboardPage() {
                     {activeModal === 'COLORS' && 'Manage streetwear color codes & variants'}
                     {activeModal === 'SIZE' && 'Manage apparel size codes and order'}
                     {activeModal === 'CAROUSEL' && 'Manage storefront homepage banner sliders and R2 imagery'}
+                    {activeModal === 'SETTINGS' && 'Configuration'}
                   </p>
                 </div>
               </div>
@@ -2455,68 +2945,51 @@ export default function AdminDashboardPage() {
                       <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider">
                         Product Name (Multifunctional: Dropdown &amp; Input) *
                       </label>
-                      {productForm.selectedProductId ? (
-                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-[10px] text-emerald-400 font-bold">
-                          <Check className="w-3 h-3" /> Auto-filled from Existing Product
-                        </span>
-                      ) : (
-                        // <span className="text-[10px] text-zinc-500">
-                        //   Select dropdown to auto-fill or enter custom name
-                        // </span>
-                        ""
-                      )}
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
-                      {/* Multifunctional Dropdown Selector */}
-                      <div className="sm:col-span-5">
-                        <select
-                          value={productForm.selectedProductId}
-                          onChange={(e) => handleSelectExistingProduct(e.target.value)}
-                          className="w-full px-3 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-xs text-zinc-300 focus:outline-none focus:border-[#fef08a] cursor-pointer"
+                    <div className="relative w-full">
+                      <input
+                        type="text"
+                        required
+                        list="existing-products-datalist"
+                        placeholder="Enter product name or select from suggestions..."
+                        value={productForm.name}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          const matched = products.find(
+                            (p) => p.name.trim().toLowerCase() === val.trim().toLowerCase()
+                          );
+                          if (matched) {
+                            handleSelectExistingProduct(String(matched.id));
+                          } else {
+                            setProductForm((prev) => ({
+                              ...prev,
+                              name: val,
+                              selectedProductId: prev.isEditing ? prev.selectedProductId : '',
+                            }));
+                          }
+                        }}
+                        className={`w-full px-3.5 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#fef08a] ${
+                          productForm.name || productForm.selectedProductId ? 'pr-9' : ''
+                        }`}
+                      />
+                      {(productForm.name || productForm.selectedProductId) && (
+                        <button
+                          type="button"
+                          onClick={() => resetFormState()}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+                          title="Clear all data and start new product"
                         >
-                          <option value="">⚡ Select Existing Product to Auto-fill...</option>
-                          {products.map((p) => (
-                            <option key={p.id} value={String(p.id)}>
-                              {p.name} {p.categoryName ? `(${p.categoryName})` : ''}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* Multifunctional Entering Field */}
-                      <div className="sm:col-span-7">
-                        <input
-                          type="text"
-                          required
-                          list="existing-products-datalist"
-                          placeholder="Or enter / edit product name..."
-                          value={productForm.name}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            const matched = products.find(
-                              (p) => p.name.trim().toLowerCase() === val.trim().toLowerCase()
-                            );
-                            if (matched) {
-                              handleSelectExistingProduct(String(matched.id));
-                            } else {
-                              setProductForm((prev) => ({
-                                ...prev,
-                                name: val,
-                                selectedProductId: prev.isEditing ? prev.selectedProductId : '',
-                              }));
-                            }
-                          }}
-                          className="w-full px-3.5 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#fef08a]"
-                        />
-                        <datalist id="existing-products-datalist">
-                          {products.map((p) => (
-                            <option key={p.id} value={p.name}>
-                              {p.categoryName || 'StyleFox Catalog'}
-                            </option>
-                          ))}
-                        </datalist>
-                      </div>
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      <datalist id="existing-products-datalist">
+                        {products.map((p) => (
+                          <option key={p.id} value={p.name}>
+                            {p.categoryName || 'StyleFox Catalog'}
+                          </option>
+                        ))}
+                      </datalist>
                     </div>
 
                     {/* Auto-filled / Editing Existing Product Information & Action */}
@@ -2531,15 +3004,17 @@ export default function AdminDashboardPage() {
                             }
                           </span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            resetFormState();
-                          }}
-                          className="px-2 py-0.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-red-400 border border-zinc-700/60 text-[10px] font-bold transition-colors cursor-pointer shrink-0 ml-2"
-                        >
-                          {productForm.isEditing ? 'Cancel Edit' : 'Clear & New Product'}
-                        </button>
+                        <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              resetFormState();
+                            }}
+                            className="px-2 py-0.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-red-400 border border-zinc-700/60 text-[10px] font-bold transition-colors cursor-pointer"
+                          >
+                            {productForm.isEditing ? 'Cancel Edit' : 'Clear & New'}
+                          </button>
+                        </div>
                       </div>
                     )}
 
@@ -2552,10 +3027,11 @@ export default function AdminDashboardPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider mb-1">
-                        Tagline
+                        Tagline <span className="text-red-400">*</span>
                       </label>
                       <input
                         type="text"
+                        required
                         placeholder="e.g. Pure Combed Heavyweight Cotton Regular Fit"
                         value={productForm.tagline}
                         onChange={(e) => setProductForm({ ...productForm, tagline: e.target.value })}
@@ -2564,30 +3040,33 @@ export default function AdminDashboardPage() {
                     </div>
                     <div>
                       <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider mb-1">
-                        Category Selection
+                        Category Selection <span className="text-red-400">*</span>
                       </label>
-                      <select
+                      <SearchableSelect
+                        options={[
+                          { value: '', label: 'Select a category (Required)' },
+                          ...rawCategories.map((cat) => ({
+                            value: cat.id,
+                            label: cat.name,
+                            sublabel: cat.slug,
+                          })),
+                        ]}
                         value={productForm.categoryId}
-                        onChange={(e) => setProductForm({ ...productForm, categoryId: e.target.value })}
-                        className="w-full px-3.5 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-xs text-zinc-300 focus:outline-none focus:border-[#fef08a] cursor-pointer"
-                      >
-                        <option value="">Select a category (Optional)</option>
-                        {rawCategories.map((cat) => (
-                          <option key={cat.id} value={cat.id}>
-                            {cat.name}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(val) => setProductForm({ ...productForm, categoryId: val })}
+                        placeholder="Select a category (Required) *"
+                        searchPlaceholder="Search categories..."
+                      />
                     </div>
                   </div>
 
                   {/* Description */}
                   <div>
                     <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider mb-1">
-                      Description
+                      Description <span className="text-red-400">*</span>
                     </label>
                     <textarea
                       rows={3}
+                      required
                       placeholder="Enter detailed garment composition, weave, fit, and craftsmanship..."
                       value={productForm.description}
                       onChange={(e) => setProductForm({ ...productForm, description: e.target.value })}
@@ -2599,7 +3078,7 @@ export default function AdminDashboardPage() {
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
                       <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider">
-                        Features (Array)
+                        Features (Array) <span className="text-red-400">*</span>
                       </label>
                       <span className="text-[10px] text-zinc-500">
                         {productForm.features.length} feature{productForm.features.length === 1 ? '' : 's'} added
@@ -2675,38 +3154,43 @@ export default function AdminDashboardPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider mb-1">
-                        Color Variant Dropdown
+                        Color Variant Dropdown <span className="text-red-400">*</span>
                       </label>
-                      <select
+                      <SearchableSelect
+                        options={[
+                          { value: '', label: 'Select Color (Required)' },
+                          ...rawColors.map((col) => ({
+                            value: col.id,
+                            label: col.name,
+                            sublabel: col.hexCode,
+                            hexCode: col.hexCode,
+                          })),
+                        ]}
                         value={productForm.colorId}
-                        onChange={(e) => setProductForm({ ...productForm, colorId: e.target.value })}
-                        className="w-full px-3.5 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-xs text-zinc-300 focus:outline-none focus:border-[#fef08a] cursor-pointer"
-                      >
-                        <option value="">Select Color (Optional)</option>
-                        {rawColors.map((col) => (
-                          <option key={col.id} value={col.id}>
-                            {col.name} ({col.hexCode})
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(val) => setProductForm({ ...productForm, colorId: val })}
+                        placeholder="Select Color (Required) *"
+                        searchPlaceholder="Search colors..."
+                      />
                     </div>
 
                     <div>
                       <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider mb-1">
                         Size Variant Dropdown
                       </label>
-                      <select
+                      <SearchableSelect
+                        options={[
+                          { value: '', label: 'Select Size (Optional)' },
+                          ...rawSizes.map((sz) => ({
+                            value: sz.id,
+                            label: sz.name,
+                            code: sz.code,
+                          })),
+                        ]}
                         value={productForm.sizeId}
-                        onChange={(e) => setProductForm({ ...productForm, sizeId: e.target.value })}
-                        className="w-full px-3.5 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-xs text-zinc-300 focus:outline-none focus:border-[#fef08a] cursor-pointer"
-                      >
-                        <option value="">Select Size (Optional)</option>
-                        {rawSizes.map((sz) => (
-                          <option key={sz.id} value={sz.id}>
-                            {sz.code} - {sz.name}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(val) => setProductForm({ ...productForm, sizeId: val })}
+                        placeholder="Select Size (Optional)"
+                        searchPlaceholder="Search sizes..."
+                      />
                     </div>
                   </div>
 
@@ -2714,7 +3198,7 @@ export default function AdminDashboardPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider mb-1">
-                        Price (₹)
+                        Price (₹) <span className="text-red-400">*</span>
                       </label>
                       <input
                         type="number"
@@ -2726,7 +3210,7 @@ export default function AdminDashboardPage() {
                     </div>
                     <div>
                       <label className="flex items-center justify-between text-[11px] font-bold text-zinc-300 uppercase tracking-wider mb-1">
-                        <span>Selling Price (₹)</span>
+                        <span>Selling Price (₹) <span className="text-red-400">*</span></span>
                         {productForm.price &&
                           productForm.sellingPrice &&
                           parseFloat(productForm.price) > parseFloat(productForm.sellingPrice) && (
@@ -2749,7 +3233,7 @@ export default function AdminDashboardPage() {
                     </div>
                     <div>
                       <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider mb-1">
-                        Stock Units
+                        Stock Units <span className="text-red-400">*</span>
                       </label>
                       <input
                         type="number"
@@ -2766,7 +3250,7 @@ export default function AdminDashboardPage() {
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
                       <label className="flex items-center gap-2 text-[11px] font-bold text-zinc-300 uppercase tracking-wider">
-                        <span>Variant Images</span>
+                        <span>Variant Images <span className="text-red-400">*</span></span>
                         <span className="px-1.5 py-0.5 rounded bg-[#fef08a]/10 border border-[#fef08a]/30 text-[9px] font-mono text-[#fef08a]">
                           Cloudflare R2 • Max 5 MB
                         </span>
@@ -2915,7 +3399,7 @@ export default function AdminDashboardPage() {
                                       </span>
                                     </div>
                                   ) : (
-                                    <span className="text-zinc-500 font-sans text-xs">Standard</span>
+                                    <span className="text-zinc-500 font-sans text-xs">—</span>
                                   )}
                                 </td>
                                 <td className="py-2.5 px-3">
@@ -2987,25 +3471,43 @@ export default function AdminDashboardPage() {
                   </div>
                 </div>
 
-                {/* Submit button: Save or Update Product */}
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-full py-3.5 rounded-xl bg-[#fef08a] hover:bg-yellow-300 text-black font-extrabold uppercase tracking-wider text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 shadow-lg shadow-yellow-500/10"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>{productForm.isEditing ? 'Updating Product & Variant...' : 'Saving Product & Variants...'}</span>
-                    </>
-                  ) : (
-                    <span>
-                      {productForm.isEditing
-                        ? 'Update Product & Variant'
-                        : `Save Product ${stagedVariants.length > 0 ? `(${stagedVariants.length} Variant${stagedVariants.length > 1 ? 's' : ''})` : ''}`}
-                    </span>
-                  )}
-                </button>
+                {/* Submit button: Save or Update Product - enabled only when at least one variant is added */}
+                {(() => {
+                  const isSaveDisabled =
+                    isSubmitting ||
+                    (!productForm.isEditing && !productForm.editingVariantId && stagedVariants.length === 0);
+
+                  return (
+                    <div className="flex flex-col gap-1.5">
+                      <button
+                        type="submit"
+                        disabled={isSaveDisabled}
+                        className="w-full py-3.5 rounded-xl bg-[#fef08a] hover:bg-yellow-300 text-black font-extrabold uppercase tracking-wider text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-yellow-500/10"
+                      >
+                        {isSubmitting ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span>{productForm.isEditing ? 'Updating Product & Variant...' : 'Saving Product & Variants...'}</span>
+                          </>
+                        ) : (
+                          <span>
+                            {productForm.isEditing
+                              ? 'Update Product & Variant'
+                              : stagedVariants.length === 0
+                              ? 'Add Variant To Save'
+                              : `Save Product (${stagedVariants.length} Variant${stagedVariants.length > 1 ? 's' : ''})`}
+                          </span>
+                        )}
+                      </button>
+
+                      {!productForm.isEditing && !productForm.editingVariantId && stagedVariants.length === 0 && (
+                        <p className="text-[11px] text-zinc-500 text-center">
+                          ⚠️ Fill Part 2 above and click <strong className="text-zinc-300">&quot;+ Add Variant to Table&quot;</strong> to enable Save Product.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
               </form>
             )}
 
@@ -3183,51 +3685,43 @@ export default function AdminDashboardPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 block mb-1.5">
-                      Variant Color
+                      Assigned Color <span className="text-red-400">*</span>
                     </label>
-                    <div className="flex items-center gap-2">
-                      <div
-                        className="w-8 h-8 rounded-lg border border-zinc-700 shrink-0 shadow-inner"
-                        style={{
-                          backgroundColor:
-                            rawColors.find((c) => c.id === variantForm.colorId)?.hexCode || '#18181b',
-                        }}
-                      />
-                      <select
-                        value={variantForm.colorId}
-                        onChange={(e) =>
-                          setVariantForm((prev) => ({ ...prev, colorId: e.target.value }))
-                        }
-                        className="flex-1 bg-zinc-900 border border-zinc-800 text-xs text-white rounded-lg px-3 py-2.5 focus:outline-none focus:border-[#fef08a] cursor-pointer"
-                      >
-                        <option value="">No Color / Default</option>
-                        {rawColors.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name} ({c.hexCode})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    <SearchableSelect
+                      options={[
+                        { value: '', label: 'Select Color (Required)' },
+                        ...rawColors.map((c) => ({
+                          value: c.id,
+                          label: c.name,
+                          sublabel: c.hexCode,
+                          hexCode: c.hexCode,
+                        })),
+                      ]}
+                      value={variantForm.colorId}
+                      onChange={(val) => setVariantForm((prev) => ({ ...prev, colorId: val }))}
+                      placeholder="Select Color (Required) *"
+                      searchPlaceholder="Search colors..."
+                    />
                   </div>
 
                   <div>
                     <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 block mb-1.5">
                       Variant Size Scale
                     </label>
-                    <select
+                    <SearchableSelect
+                      options={[
+                        { value: '', label: 'Free Size / None' },
+                        ...rawSizes.map((s) => ({
+                          value: s.id,
+                          label: s.name,
+                          code: s.code,
+                        })),
+                      ]}
                       value={variantForm.sizeId}
-                      onChange={(e) =>
-                        setVariantForm((prev) => ({ ...prev, sizeId: e.target.value }))
-                      }
-                      className="w-full bg-zinc-900 border border-zinc-800 text-xs text-white rounded-lg px-3 py-2.5 focus:outline-none focus:border-[#fef08a] cursor-pointer"
-                    >
-                      <option value="">Free Size / None</option>
-                      {rawSizes.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.code} {s.name !== s.code ? `(${s.name})` : ''}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(val) => setVariantForm((prev) => ({ ...prev, sizeId: val }))}
+                      placeholder="Free Size / None"
+                      searchPlaceholder="Search sizes..."
+                    />
                   </div>
                 </div>
 
@@ -3257,7 +3751,7 @@ export default function AdminDashboardPage() {
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
                       <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
-                        Selling Price (₹)
+                        Selling Price (₹) <span className="text-red-400">*</span>
                       </label>
                       {Boolean(
                         variantForm.sellingPrice &&
@@ -3280,6 +3774,7 @@ export default function AdminDashboardPage() {
                         type="number"
                         min="0"
                         step="any"
+                        required
                         value={variantForm.sellingPrice}
                         onChange={(e) =>
                           setVariantForm((prev) => ({ ...prev, sellingPrice: e.target.value }))
@@ -3351,7 +3846,7 @@ export default function AdminDashboardPage() {
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-zinc-400">
-                      <span>Variant Images</span>
+                      <span>Variant Images <span className="text-red-400">*</span></span>
                       <span className="px-1.5 py-0.5 rounded bg-amber-400/10 border border-amber-400/30 text-[9px] font-mono text-[#fef08a]">
                         Cloudflare R2 • Max 5 MB
                       </span>
@@ -3430,35 +3925,67 @@ export default function AdminDashboardPage() {
                 </div>
 
                 {/* Form Action Footer */}
-                <div className="flex items-center justify-end gap-3 pt-3 border-t border-zinc-900 mt-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveModal('NONE');
-                      setModalFeedback(null);
-                    }}
-                    className="px-4 py-2.5 rounded-xl border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-900 transition-colors text-xs font-bold cursor-pointer"
-                  >
-                    Cancel
-                  </button>
+                <div className="flex items-center justify-between gap-3 pt-3 border-t border-zinc-900 mt-2">
+                  {variantForm.variantId ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const matchingProd = products.find((p) => p.id === variantForm.productId);
+                        const vCount = matchingProd?.variants?.length || 1;
+                        const col = rawColors.find((c) => c.id === variantForm.colorId);
+                        const sz = rawSizes.find((s) => s.id === variantForm.sizeId);
 
-                  <button
-                    type="submit"
-                    disabled={isSubmitting}
-                    className="px-5 py-2.5 rounded-xl bg-[#fef08a] text-black font-black text-xs uppercase tracking-wider hover:bg-yellow-300 transition-colors disabled:opacity-50 flex items-center gap-2 cursor-pointer shadow-lg shadow-[#fef08a]/10"
-                  >
-                    {isSubmitting ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Updating Variant & Stock...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Check className="w-4 h-4" />
-                        <span>Update Variant & Stock</span>
-                      </>
-                    )}
-                  </button>
+                        setVariantToDelete({
+                          variantId: variantForm.variantId,
+                          productId: variantForm.productId,
+                          productName: variantForm.productName,
+                          colorName: col?.name,
+                          colorHex: col?.hexCode,
+                          sizeCode: sz?.code,
+                          price: parseFloat(variantForm.price) || 0,
+                          sellingPrice: variantForm.sellingPrice ? parseFloat(variantForm.sellingPrice) : undefined,
+                          image: variantForm.images[0] || variantForm.productImage,
+                          isOnlyVariant: vCount <= 1,
+                        });
+                      }}
+                      className="px-3.5 py-2.5 rounded-xl bg-red-950/60 hover:bg-red-900 text-red-300 hover:text-white border border-red-800/80 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+                      title="Delete this variant"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                      <span>Delete Variant</span>
+                    </button>
+                  ) : <div />}
+
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveModal('NONE');
+                        setModalFeedback(null);
+                      }}
+                      className="px-4 py-2.5 rounded-xl border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-900 transition-colors text-xs font-bold cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="px-5 py-2.5 rounded-xl bg-[#fef08a] text-black font-black text-xs uppercase tracking-wider hover:bg-yellow-300 transition-colors disabled:opacity-50 flex items-center gap-2 cursor-pointer shadow-lg shadow-[#fef08a]/10"
+                    >
+                      {isSubmitting ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Updating Variant & Stock...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-4 h-4" />
+                          <span>Update Variant & Stock</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </form>
             )}
@@ -4107,6 +4634,214 @@ export default function AdminDashboardPage() {
                 )}
               </div>
             )}
+
+            {/* 6. SETTINGS MODAL (WhatsApp Enquiry & Shipping Threshold) */}
+            {activeModal === 'SETTINGS' && (
+              <div className="flex flex-col gap-6">
+                {isLoadingSettings ? (
+                  <div className="py-12 flex flex-col items-center justify-center gap-3 text-zinc-400">
+                    <Loader2 className="w-6 h-6 animate-spin text-[#fef08a]" />
+                    <span className="text-xs">Loading store settings from database...</span>
+                  </div>
+                ) : (
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      const token = getAuthToken();
+                      if (!token) {
+                        setModalFeedback({
+                          type: 'error',
+                          text: 'Admin authorization session expired. Please sign in again.',
+                        });
+                        return;
+                      }
+
+                      setIsSavingSettings(true);
+                      setModalFeedback(null);
+                      try {
+                        const cleanWhatsapp = settingsForm.whatsappNumber.replace(/[^0-9]/g, '');
+                        if (!cleanWhatsapp || cleanWhatsapp.length < 7) {
+                          setModalFeedback({
+                            type: 'error',
+                            text: 'Please enter a valid WhatsApp phone number (with country code, e.g. 918086388058).',
+                          });
+                          setIsSavingSettings(false);
+                          return;
+                        }
+
+                        const threshold = Number(settingsForm.freeShippingThreshold);
+                        if (isNaN(threshold) || threshold < 0) {
+                          setModalFeedback({
+                            type: 'error',
+                            text: 'Free shipping amount must be a non-negative number.',
+                          });
+                          setIsSavingSettings(false);
+                          return;
+                        }
+
+                        if (!settingsForm.shippingFee && settingsForm.shippingFee !== 0) {
+                          setModalFeedback({
+                            type: 'error',
+                            text: 'Standard shipping fee is required.',
+                          });
+                          setIsSavingSettings(false);
+                          return;
+                        }
+
+                        const fee = Number(settingsForm.shippingFee);
+                        if (isNaN(fee) || fee < 0) {
+                          setModalFeedback({
+                            type: 'error',
+                            text: 'Standard shipping fee must be a valid non-negative number.',
+                          });
+                          setIsSavingSettings(false);
+                          return;
+                        }
+
+                        const res = await updateAdminStoreSettings(token, {
+                          whatsappNumber: cleanWhatsapp,
+                          freeShippingThreshold: threshold,
+                          shippingFee: fee,
+                        });
+
+                        if (res.ok) {
+                          setModalFeedback({
+                            type: 'success',
+                            text: 'Store settings successfully saved into database JSON!',
+                          });
+                          // Dispatch local storage / broadcast if any
+                          if (typeof window !== 'undefined') {
+                            window.dispatchEvent(new Event('store_settings_updated'));
+                          }
+                          setTimeout(() => {
+                            setActiveModal('NONE');
+                            setModalFeedback(null);
+                          }, 1200);
+                        } else {
+                          setModalFeedback({
+                            type: 'error',
+                            text: res.message || 'Failed to update store settings.',
+                          });
+                        }
+                      } catch (err: any) {
+                        setModalFeedback({
+                          type: 'error',
+                          text: err?.message || 'Unexpected error occurred while updating settings.',
+                        });
+                      } finally {
+                        setIsSavingSettings(false);
+                      }
+                    }}
+                    className="flex flex-col gap-5"
+                  >
+                    {/* WhatsApp Enquiry Number Field */}
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-zinc-300 mb-2">
+                        WhatsApp Enquiry Number <span className="text-red-400">*</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          required
+                          value={settingsForm.whatsappNumber}
+                          onChange={(e) =>
+                            setSettingsForm({ ...settingsForm, whatsappNumber: e.target.value })
+                          }
+                          placeholder="e.g. 918086388058"
+                          className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 focus:border-[#fef08a] focus:outline-none text-white text-xs font-mono transition-colors"
+                        />
+                      </div>
+                      <p className="text-[10px] text-zinc-500 mt-1.5">
+                        Include country code without &quot;+&quot; or spaces (e.g., <strong>918086388058</strong>). Used for all customer WhatsApp queries &amp; rebook requests.
+                      </p>
+                    </div>
+
+                    {/* Free Shipping Amount Threshold Field */}
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-zinc-300 mb-2">
+                        Free Shipping Amount (₹) <span className="text-red-400">*</span>
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-mono font-bold">
+                          ₹
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          required
+                          value={settingsForm.freeShippingThreshold}
+                          onChange={(e) =>
+                            setSettingsForm({ ...settingsForm, freeShippingThreshold: e.target.value })
+                          }
+                          placeholder="2000"
+                          className="w-full pl-8 pr-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 focus:border-[#fef08a] focus:outline-none text-white text-xs font-mono transition-colors"
+                        />
+                      </div>
+                      <p className="text-[10px] text-zinc-500 mt-1.5">
+                        Orders equal to or exceeding this subtotal qualify for <strong>FREE express delivery</strong>. Subtotals below will incur shipping fee.
+                      </p>
+                    </div>
+
+                    {/* Standard Shipping Fee Field */}
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-zinc-300 mb-2">
+                        Standard Shipping Fee (₹) <span className="text-red-400">*</span>
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-mono font-bold">
+                          ₹
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          required
+                          value={settingsForm.shippingFee}
+                          onChange={(e) =>
+                            setSettingsForm({ ...settingsForm, shippingFee: e.target.value })
+                          }
+                          placeholder="149"
+                          className="w-full pl-8 pr-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 focus:border-[#fef08a] focus:outline-none text-white text-xs font-mono transition-colors"
+                        />
+                      </div>
+                      <p className="text-[10px] text-zinc-500 mt-1.5">
+                        Charged when cart subtotal is less than the free shipping threshold. Default is ₹149.
+                      </p>
+                    </div>
+
+                    {/* Submit Button */}
+                    <div className="flex items-center justify-end gap-3 pt-3 border-t border-zinc-900">
+                      <button
+                        type="button"
+                        onClick={() => setActiveModal('NONE')}
+                        disabled={isSavingSettings}
+                        className="px-4 py-2.5 rounded-xl border border-zinc-800 hover:bg-zinc-900 text-zinc-300 font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isSavingSettings}
+                        className="px-6 py-2.5 rounded-xl bg-[#fef08a] hover:bg-yellow-300 text-black font-extrabold uppercase tracking-wider text-xs transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50 shadow-lg shadow-yellow-500/10"
+                      >
+                        {isSavingSettings ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin text-black" />
+                            <span>Saving Settings...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-4 h-4 text-black" />
+                            <span>Save Settings</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -4298,26 +5033,27 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      {/* Active Carousel Deletion Blocked Warning Modal (Reference Style) */}
-      {activeCarouselWarning && (
+      {/* Variant Delete Warning & Confirmation Modal */}
+      {variantToDelete && (
         <div className="fixed inset-0 z-[75] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
           <div className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative text-white animate-in zoom-in-95 duration-150">
             {/* Header with Alert Warning Icon */}
             <div className="flex items-start gap-3.5 mb-4">
-              <div className="w-10 h-10 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-5 h-5 text-amber-400" />
+              <div className="w-10 h-10 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-red-400" />
               </div>
               <div className="flex-1 min-w-0">
                 <h3 className="text-base font-bold text-white tracking-tight">
-                  Cannot Delete Active Carousel
+                  Delete Variant from Inventory?
                 </h3>
                 <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
-                  <strong className="text-white">&quot;{activeCarouselWarning.title}&quot;</strong> is currently live on the storefront as the active banner. To delete this carousel, you must activate another carousel first.
+                  This variant and its associated image files will be permanently deleted from database and Cloudflare R2 bucket.
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => setActiveCarouselWarning(null)}
+                onClick={() => setVariantToDelete(null)}
+                disabled={isDeletingVariant}
                 className="p-1 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -4326,40 +5062,149 @@ export default function AdminDashboardPage() {
 
             {/* Thumbnail and Details Preview */}
             <div className="my-4 p-3 rounded-xl bg-zinc-900/60 border border-zinc-800/80 flex items-center gap-3.5">
-              <div className="w-20 h-14 rounded-lg overflow-hidden border border-emerald-500/40 bg-zinc-900 shrink-0 relative">
-                {activeCarouselWarning.images && activeCarouselWarning.images.length > 0 ? (
+              <div className="w-16 h-16 rounded-lg overflow-hidden border border-zinc-700 bg-zinc-900 shrink-0 relative">
+                {variantToDelete.image ? (
                   <img
-                    src={formatProductImageUrl(activeCarouselWarning.images[0])}
-                    alt={activeCarouselWarning.title}
+                    src={formatProductImageUrl(variantToDelete.image)}
+                    alt={variantToDelete.productName}
                     className="w-full h-full object-cover"
                     onError={(e) => {
                       (e.currentTarget as HTMLImageElement).src =
-                        'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&q=80&w=400';
+                        'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&q=80&w=400';
                     }}
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-zinc-600">
-                    <ImageIcon className="w-5 h-5" />
+                    <Package className="w-5 h-5" />
                   </div>
                 )}
-                <span className="absolute bottom-0.5 right-0.5 px-1 py-0.2 rounded bg-black/80 text-[8px] font-mono text-emerald-400">
-                  {activeCarouselWarning.images?.length || 0} img
-                </span>
               </div>
               <div className="flex-1 min-w-0 text-left">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <span className="inline-block px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono text-[10px] font-bold uppercase">
-                    Active Banner
-                  </span>
-                  <span className="text-[10px] text-zinc-500 font-mono">
-                    Protected
-                  </span>
-                </div>
-                <p className="text-xs font-bold text-white uppercase truncate">
-                  {activeCarouselWarning.title}
+                <p className="text-xs font-bold text-white truncate">
+                  {variantToDelete.productName}
                 </p>
-                <p className="text-[10px] text-amber-400/90 mt-1 font-medium">
-                  Please activate a different carousel before deleting this one.
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  {variantToDelete.sizeCode && (
+                    <span className="px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 font-mono text-[10px] font-bold text-white">
+                      Size: {variantToDelete.sizeCode}
+                    </span>
+                  )}
+                  {variantToDelete.colorName ? (
+                    <span className="flex items-center gap-1 text-[11px] text-zinc-300">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full border border-zinc-600 shrink-0"
+                        style={{ backgroundColor: variantToDelete.colorHex || '#0d0d0d' }}
+                      />
+                      {variantToDelete.colorName}
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-zinc-500">No color</span>
+                  )}
+                </div>
+                <div className="mt-1 flex items-center gap-2 text-xs">
+                  <span className="font-bold text-white">
+                    ₹ {variantToDelete.sellingPrice ? variantToDelete.sellingPrice.toLocaleString() : variantToDelete.price?.toLocaleString()}
+                  </span>
+                  {variantToDelete.isOnlyVariant && (
+                    <span className="text-[10px] text-amber-400 font-medium">
+                      (Only variant - will remove product)
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-zinc-900">
+              <button
+                type="button"
+                onClick={() => setVariantToDelete(null)}
+                disabled={isDeletingVariant}
+                className="px-4 py-2.5 rounded-xl border border-zinc-800 hover:bg-zinc-900 text-zinc-300 font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer"
+              >
+                CANCEL
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteVariant}
+                disabled={isDeletingVariant}
+                className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs uppercase tracking-wider transition-colors flex items-center gap-2 cursor-pointer shadow-lg shadow-red-950/40 disabled:opacity-50"
+              >
+                {isDeletingVariant ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>DELETING...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>YES, DELETE VARIANT</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Product Delete Warning & Confirmation Modal */}
+      {productToDelete && (
+        <div className="fixed inset-0 z-[75] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative text-white animate-in zoom-in-95 duration-150">
+            {/* Header with Alert Warning Icon */}
+            <div className="flex items-start gap-3.5 mb-4">
+              <div className="w-10 h-10 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-red-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-bold text-white tracking-tight">
+                  Delete Entire Product &amp; Variants?
+                </h3>
+                <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                  This will permanently delete this product, all {productToDelete.variantCount || 0} variant(s), and purge all imagery from Cloudflare R2 bucket.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setProductToDelete(null)}
+                disabled={isDeletingProduct}
+                className="p-1 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Thumbnail and Details Preview */}
+            <div className="my-4 p-3 rounded-xl bg-zinc-900/60 border border-zinc-800/80 flex items-center gap-3.5">
+              <div className="w-16 h-16 rounded-lg overflow-hidden border border-zinc-700 bg-zinc-900 shrink-0 relative">
+                {productToDelete.image ? (
+                  <img
+                    src={formatProductImageUrl(productToDelete.image)}
+                    alt={productToDelete.productName}
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src =
+                        'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&q=80&w=400';
+                    }}
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-zinc-600">
+                    <Package className="w-5 h-5" />
+                  </div>
+                )}
+              </div>
+              <div className="flex-1 min-w-0 text-left">
+                <span className="inline-block px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20 text-red-400 font-mono text-[10px] font-bold uppercase mb-1">
+                  ENTIRE PRODUCT
+                </span>
+                <p className="text-xs font-bold text-white truncate">
+                  {productToDelete.productName}
+                </p>
+                <p className="text-[11px] text-zinc-400 mt-0.5">
+                  Category: {productToDelete.categoryName} • {productToDelete.variantCount} variant(s)
+                </p>
+                <p className="text-[10px] text-red-400/90 mt-1">
+                  This action is irreversible.
                 </p>
               </div>
             </div>
@@ -4368,10 +5213,29 @@ export default function AdminDashboardPage() {
             <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-zinc-900">
               <button
                 type="button"
-                onClick={() => setActiveCarouselWarning(null)}
-                className="w-full py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer text-center"
+                onClick={() => setProductToDelete(null)}
+                disabled={isDeletingProduct}
+                className="px-4 py-2.5 rounded-xl border border-zinc-800 hover:bg-zinc-900 text-zinc-300 font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer"
               >
-                I Understand
+                CANCEL
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteProduct}
+                disabled={isDeletingProduct}
+                className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs uppercase tracking-wider transition-colors flex items-center gap-2 cursor-pointer shadow-lg shadow-red-950/40 disabled:opacity-50"
+              >
+                {isDeletingProduct ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>DELETING...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>YES, DELETE PRODUCT</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { useSettings } from './SettingsContext';
 
 export interface CartItem {
   id: string; // unique composite key: `${productId}-${color}-${size}`
@@ -24,6 +25,8 @@ interface CartContextType {
   discount: number;
   shipping: number;
   grandTotal: number;
+  freeShippingThreshold: number;
+  shippingFee: number;
   isCartOpen: boolean;
   setIsCartOpen: (open: boolean) => void;
 }
@@ -96,10 +99,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const clearCart = () => setItems([]);
 
+  const { settings } = useSettings();
+  const freeShippingThreshold = Number(settings?.freeShippingThreshold) || 2000;
+  const shippingFee = Number(settings?.shippingFee) || 149;
+
   const totalCount = items.reduce((sum, item) => sum + item.quantity, 0);
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  // Free shipping above 2000, else 149
-  const shipping = subtotal > 1999 || subtotal === 0 ? 0 : 149;
+  // Free shipping when subtotal >= freeShippingThreshold, else shippingFee
+  const shipping = subtotal >= freeShippingThreshold || subtotal === 0 ? 0 : shippingFee;
   // 10% instant discount on orders above 2500
   const discount = subtotal >= 2500 ? Math.round(subtotal * 0.1) : 0;
   const grandTotal = Math.max(0, subtotal - discount + shipping);
@@ -117,6 +124,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         discount,
         shipping,
         grandTotal,
+        freeShippingThreshold,
+        shippingFee,
         isCartOpen,
         setIsCartOpen,
       }}

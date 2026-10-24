@@ -85,54 +85,40 @@ export function transformBackendProduct(
     if (v.size?.code) sizeSet.add(v.size.code);
     else if (v.size?.name) sizeSet.add(v.size.name);
 
-    const cName = v.color?.name || 'Standard';
-    const cHex = v.color?.hexCode || '#0d0d0d';
-    const rawVariantImages =
-      Array.isArray(v.images) && v.images.length > 0
-        ? v.images
-        : Array.isArray(raw.images) && raw.images.length > 0
-        ? raw.images
-        : [
-            'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80',
-          ];
+    if (v.color?.name) {
+      const cName = v.color.name;
+      const cHex = v.color.hexCode || '#0d0d0d';
+      const rawVariantImages =
+        Array.isArray(v.images) && v.images.length > 0
+          ? v.images
+          : Array.isArray(raw.images) && raw.images.length > 0
+          ? raw.images
+          : [
+              'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80',
+            ];
 
-    const vImages = rawVariantImages.map((img: string) => formatProductImageUrl(img));
+      const vImages = rawVariantImages.map((img: string) => formatProductImageUrl(img));
 
-    if (!colorMap.has(cName)) {
-      colorMap.set(cName, {
-        name: cName,
-        hex: cHex,
-        images: vImages,
-      });
-    } else {
-      // Merge unique images
-      const existing = colorMap.get(cName)!;
-      for (const img of vImages) {
-        if (!existing.images.includes(img)) {
-          existing.images.push(img);
+      if (!colorMap.has(cName)) {
+        colorMap.set(cName, {
+          name: cName,
+          hex: cHex,
+          images: vImages,
+        });
+      } else {
+        // Merge unique images
+        const existing = colorMap.get(cName)!;
+        for (const img of vImages) {
+          if (!existing.images.includes(img)) {
+            existing.images.push(img);
+          }
         }
       }
     }
   }
 
-  // Fallback colors if no variant colors
+  // Real configured colors; if no variant has a color assigned, colors will be empty
   let colors = Array.from(colorMap.values());
-  if (colors.length === 0) {
-    const rawImagesList =
-      Array.isArray(raw.images) && raw.images.length > 0
-        ? raw.images
-        : [
-            'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80',
-          ];
-    const rawImages = rawImagesList.map((img: string) => formatProductImageUrl(img));
-    colors = [
-      {
-        name: 'Obsidian Black',
-        hex: '#0d0d0d',
-        images: rawImages,
-      },
-    ];
-  }
 
   // Sizes from active variants or default list
   const sizes =
@@ -1222,6 +1208,70 @@ export async function deleteAdminVariantImage(
 }
 
 /**
+ * Delete an entire variant and its assets from Cloudflare R2 (Admin only)
+ */
+export async function deleteAdminVariant(
+  token: string,
+  variantId: string
+): Promise<{ ok: boolean; status: number; message?: string }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/products/variants/${variantId}`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.ok) {
+      clearApiCache();
+    }
+    return {
+      ok: res.ok,
+      status: res.status,
+      message: json.message || (res.ok ? 'Variant deleted successfully' : 'Failed to delete variant'),
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      message: err.message || 'Network error deleting variant',
+    };
+  }
+}
+
+/**
+ * Delete an entire product, its variants, and all R2 assets (Admin only)
+ */
+export async function deleteAdminProduct(
+  token: string,
+  productId: string
+): Promise<{ ok: boolean; status: number; message?: string }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/products/${productId}`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.ok) {
+      clearApiCache();
+    }
+    return {
+      ok: res.ok,
+      status: res.status,
+      message: json.message || (res.ok ? 'Product deleted successfully' : 'Failed to delete product'),
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      message: err.message || 'Network error deleting product',
+    };
+  }
+}
+
+/**
  * Directly delete a file from Cloudflare R2 (Admin only)
  */
 export async function deleteImageFromR2(
@@ -1433,5 +1483,70 @@ export async function deleteAdminCarousel(
   }
 }
 
+export interface StoreSettingsData {
+  whatsappNumber: string;
+  freeShippingThreshold: number;
+  shippingFee?: number;
+  supportEmail?: string;
+  [key: string]: any;
+}
 
+/**
+ * Fetch public store settings (WhatsApp number, free shipping threshold, etc.)
+ */
+export async function fetchStoreSettings(): Promise<StoreSettingsData> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/settings`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+    });
+    if (res.ok) {
+      const json = await res.json();
+      if (json && json.data) {
+        return json.data;
+      }
+    }
+  } catch (err) {
+    console.error('Failed to fetch store settings:', err);
+  }
+  return {
+    whatsappNumber: '918086388058',
+    freeShippingThreshold: 2000,
+    shippingFee: 149,
+  };
+}
 
+/**
+ * Update store settings (Admin only)
+ */
+export async function updateAdminStoreSettings(
+  token: string,
+  data: Partial<StoreSettingsData>
+): Promise<{ ok: boolean; status: number; message?: string; data?: StoreSettingsData }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/settings`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(data),
+    });
+    const json = await res.json().catch(() => ({}));
+    return {
+      ok: res.ok,
+      status: res.status,
+      message: json.message || (res.ok ? 'Settings updated successfully' : 'Failed to update settings'),
+      data: json.data,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      message: err.message || 'Network error while updating settings',
+    };
+  }
+}
