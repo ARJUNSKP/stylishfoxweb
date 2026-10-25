@@ -1337,7 +1337,7 @@ const ACTIVE_CAROUSEL_TTL = 30000; // 30 seconds cache
  * Uses request de-duplication and memory caching to prevent multiple concurrent calls.
  */
 export async function fetchActiveCarousel(bypassCache = false): Promise<CarouselItem | null> {
-  const now = Date.now();
+  const now = typeof performance !== 'undefined' ? performance.now() : 0;
   if (!bypassCache && activeCarouselCached && (now - activeCarouselCached.timestamp < ACTIVE_CAROUSEL_TTL)) {
     return activeCarouselCached.data;
   }
@@ -1351,13 +1351,14 @@ export async function fetchActiveCarousel(bypassCache = false): Promise<Carousel
       const res = await fetch(`${API_BASE_URL}/carousels/active`, {
         next: { revalidate: 10 },
       });
+      const currentPerf = typeof performance !== 'undefined' ? performance.now() : 0;
       if (!res.ok) {
-        activeCarouselCached = { data: null, timestamp: Date.now() };
+        activeCarouselCached = { data: null, timestamp: currentPerf };
         return null;
       }
       const json = await res.json();
       const result = json.data || null;
-      activeCarouselCached = { data: result, timestamp: Date.now() };
+      activeCarouselCached = { data: result, timestamp: currentPerf };
       return result;
     } catch {
       return null;
@@ -1491,51 +1492,82 @@ export interface StoreSettingsData {
   [key: string]: any;
 }
 
+let cachedStoreSettings: StoreSettingsData | null = null;
+let settingsFetchPromise: Promise<StoreSettingsData> | null = null;
+
 /**
  * Fetch public store settings (WhatsApp number, free shipping threshold, etc.)
+ * Uses in-memory caching and request deduplication to prevent repeated API calls.
  */
-export async function fetchStoreSettings(): Promise<StoreSettingsData> {
-  try {
-    const res = await fetch(`${API_BASE_URL}/settings`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      cache: 'no-store',
-    });
-    if (res.ok) {
-      const json = await res.json();
-      if (json && json.data) {
-        return json.data;
-      }
-    }
-  } catch (err) {
-    console.error('Failed to fetch store settings:', err);
+export async function fetchStoreSettings(forceRefresh = false): Promise<StoreSettingsData> {
+  if (!forceRefresh && cachedStoreSettings) {
+    return cachedStoreSettings;
   }
-  return {
-    whatsappNumber: '918086388058',
-    freeShippingThreshold: 2000,
-    shippingFee: 149,
-  };
+  if (!forceRefresh && settingsFetchPromise) {
+    return settingsFetchPromise;
+  }
+
+  settingsFetchPromise = (async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/settings`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json && json.data) {
+          cachedStoreSettings = json.data;
+          return json.data;
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to fetch store settings:', err);
+    } finally {
+      settingsFetchPromise = null;
+    }
+    const fallback: StoreSettingsData = {
+      whatsappNumber: '918086388058',
+      freeShippingThreshold: 2000,
+      shippingFee: 149,
+    };
+    cachedStoreSettings = fallback;
+    return fallback;
+  })();
+
+  return settingsFetchPromise;
 }
 
 /**
- * Update store settings (Admin only)
+ * Update store settings (no authentication token required)
  */
 export async function updateAdminStoreSettings(
-  token: string,
-  data: Partial<StoreSettingsData>
+  data: Partial<StoreSettingsData>,
+  token?: string
 ): Promise<{ ok: boolean; status: number; message?: string; data?: StoreSettingsData }> {
   try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const res = await fetch(`${API_BASE_URL}/settings`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
+      headers,
       body: JSON.stringify(data),
     });
     const json = await res.json().catch(() => ({}));
+
+    if (res.ok && json.data) {
+      cachedStoreSettings = {
+        ...(cachedStoreSettings || {}),
+        ...json.data,
+      };
+    }
+
     return {
       ok: res.ok,
       status: res.status,

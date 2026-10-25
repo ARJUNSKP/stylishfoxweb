@@ -400,7 +400,7 @@ export default function ProductDetailClient({
                 >
                   <Image
                     src={imgUrl}
-                    alt={`${product.name} view ${idx + 1}`}
+                    alt={product?.name ? `${product.name} view ${idx + 1}` : `Product view ${idx + 1}`}
                     fill
                     unoptimized
                     sizes="(max-width: 768px) 60px, 96px"
@@ -448,7 +448,7 @@ export default function ProductDetailClient({
 
             <Image
               src={activeImages[activeImageIndex] || activeImages[0]}
-              alt={`${product.name} - ${activeColor.name}`}
+              alt={product?.name ? `${product.name} - ${activeColor?.name || 'Standard'}` : 'Product image'}
               fill
               priority
               unoptimized
@@ -899,7 +899,7 @@ export default function ProductDetailClient({
                 <div className="relative aspect-[3/4] bg-zinc-900 overflow-hidden mb-3">
                   <Image
                     src={relImage}
-                    alt={relProduct.name}
+                    alt={relProduct?.name || 'Related product'}
                     fill
                     unoptimized
                     sizes="(max-width: 768px) 50vw, 25vw"

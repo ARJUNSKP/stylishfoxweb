@@ -4647,15 +4647,6 @@ export default function AdminDashboardPage() {
                   <form
                     onSubmit={async (e) => {
                       e.preventDefault();
-                      const token = getAuthToken();
-                      if (!token) {
-                        setModalFeedback({
-                          type: 'error',
-                          text: 'Admin authorization session expired. Please sign in again.',
-                        });
-                        return;
-                      }
-
                       setIsSavingSettings(true);
                       setModalFeedback(null);
                       try {
@@ -4698,7 +4689,7 @@ export default function AdminDashboardPage() {
                           return;
                         }
 
-                        const res = await updateAdminStoreSettings(token, {
+                        const res = await updateAdminStoreSettings({
                           whatsappNumber: cleanWhatsapp,
                           freeShippingThreshold: threshold,
                           shippingFee: fee,

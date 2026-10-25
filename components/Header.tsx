@@ -6,19 +6,12 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useCart } from '@/context/CartContext';
 import { useProfile } from '@/context/ProfileContext';
-import { useSettings } from '@/context/SettingsContext';
 
 const emptySubscribe = () => () => {};
 
 export default function Header() {
   const { totalCount, setIsCartOpen } = useCart();
   const { openProfileOrAuth, profile, isAuthenticated, user, isAdmin } = useProfile();
-  const { settings, refreshSettings } = useSettings();
-
-  // Call settings API on mount
-  React.useEffect(() => {
-    refreshSettings();
-  }, [refreshSettings]);
 
   const isMounted = useSyncExternalStore(
     emptySubscribe,
