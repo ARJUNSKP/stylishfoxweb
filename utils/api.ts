@@ -1,7 +1,6 @@
 import { Product, ProductColor, productsData } from '@/data/products';
 
-export const API_BASE_URL =
-  process.env.API_URL || 'http://localhost:8001/api/v1';
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || ""
 
 /**
  * Resolves any product image URL to a publicly accessible, renderable image URL.
