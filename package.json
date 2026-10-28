@@ -18,6 +18,8 @@
     "react-infinite-scroll-component": "^7.2.1"
   },
   "devDependencies": {
+    "@emnapi/core": "^1.11.3",
+    "@emnapi/runtime": "^1.11.3",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -29,3 +31,4 @@
     "typescript": "^5"
   }
 }
+
