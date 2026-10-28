@@ -801,18 +801,13 @@ export default function ProductDetailClient({
           </div>
 
           {/* Trust badges */}
-          <div className="grid grid-cols-3 gap-1.5 sm:gap-2 py-3 sm:py-4 border-t border-b border-zinc-800/80 text-center">
-            <div className="flex flex-col items-center gap-1 p-1.5 sm:p-2">
+          <div className="grid grid-cols-2 gap-2 sm:gap-4 py-3 sm:py-4 border-t border-b border-zinc-800/80 text-center">
+            <div className="flex flex-col items-center justify-center gap-1 p-1.5 sm:p-2 border-r border-zinc-800/80">
               <Truck className="w-4 sm:w-5 h-4 sm:h-5 text-[#fef08a]" />
               <span className="text-[10px] sm:text-[11px] font-bold text-white">Free Express</span>
               <span className="text-[9px] sm:text-[10px] text-zinc-400">Over ₹1,999</span>
             </div>
-            <div className="flex flex-col items-center gap-1 p-1.5 sm:p-2 border-x border-zinc-800/80">
-              <RotateCcw className="w-4 sm:w-5 h-4 sm:h-5 text-[#fef08a]" />
-              <span className="text-[10px] sm:text-[11px] font-bold text-white">7 Days Easy</span>
-              <span className="text-[9px] sm:text-[10px] text-zinc-400">Return & Exchange</span>
-            </div>
-            <div className="flex flex-col items-center gap-1 p-1.5 sm:p-2">
+            <div className="flex flex-col items-center justify-center gap-1 p-1.5 sm:p-2">
               <ShieldCheck className="w-4 sm:w-5 h-4 sm:h-5 text-[#fef08a]" />
               <span className="text-[10px] sm:text-[11px] font-bold text-white">100% Genuine</span>
               <span className="text-[9px] sm:text-[10px] text-zinc-400">Combed Cotton</span>
