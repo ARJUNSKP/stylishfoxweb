@@ -41,24 +41,32 @@ export default function ProductDetailClient({
   } = useProfile();
   const allProducts = getAllProducts();
 
-  const [relatedProducts, setRelatedProducts] = useState<Product[]>(() => {
-    if (initialRelatedProducts && initialRelatedProducts.length > 0) {
-      return initialRelatedProducts;
-    }
-    return allProducts
-      .filter((p) => String(p.id) !== String(product.id))
-      .slice(0, 4);
-  });
+  const [relatedProducts, setRelatedProducts] = useState<Product[]>(
+    initialRelatedProducts && initialRelatedProducts.length > 0
+      ? initialRelatedProducts
+      : []
+  );
 
   useEffect(() => {
-    if (!initialRelatedProducts || initialRelatedProducts.length === 0) {
+    if (initialRelatedProducts && initialRelatedProducts.length > 0) {
+      setRelatedProducts(initialRelatedProducts);
+      return;
+    }
+
+    if (product?.id) {
       fetchRelatedProducts(product.id, 4).then((data) => {
         if (data && data.length > 0) {
           setRelatedProducts(data);
+        } else {
+          // Fallback only if backend returned empty
+          const fallback = allProducts
+            .filter((p) => String(p.id) !== String(product.id))
+            .slice(0, 4);
+          setRelatedProducts(fallback);
         }
       });
     }
-  }, [product.id, initialRelatedProducts]);
+  }, [product?.id, initialRelatedProducts]);
 
   const fallbackImages =
     product.images && product.images.length > 0
@@ -884,9 +892,14 @@ export default function ProductDetailClient({
 
         <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-4 md:gap-6">
           {relatedProducts.map((relProduct, idx) => {
+            const variantImage =
+              Array.isArray(relProduct.variants) && relProduct.variants[0]?.images?.[0]
+                ? relProduct.variants[0].images[0]
+                : null;
             const relImage = formatProductImageUrl(
               relProduct.colors?.[0]?.images?.[0] ||
               relProduct.images?.[0] ||
+              variantImage ||
               'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80'
             );
 
