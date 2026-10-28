@@ -31,7 +31,7 @@ export default function ProductDetailClient({
   product,
   initialRelatedProducts,
 }: Props) {
-  const { addToCart } = useCart();
+  const { addToCart, clearCart } = useCart();
   const { settings } = useSettings();
   const {
     profile,
@@ -366,6 +366,7 @@ export default function ProductDetailClient({
 
     if (typeof window !== 'undefined') {
       window.open(url, '_blank', 'noopener,noreferrer');
+      clearCart();
     }
   };
 

@@ -22,6 +22,7 @@ export default function CartDrawer() {
     grandTotal,
     totalCount,
     freeShippingThreshold: cartFreeShippingThreshold,
+    clearCart,
   } = useCart();
   const { settings } = useSettings();
 
@@ -82,6 +83,9 @@ export default function CartDrawer() {
     }
     if (typeof window !== 'undefined') {
       window.open(whatsappCartUrl, '_blank', 'noopener,noreferrer');
+      // Clear the cart bag and close cart drawer upon sending order
+      clearCart();
+      setIsCartOpen(false);
     }
   };
 
