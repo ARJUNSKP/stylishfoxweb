@@ -70,8 +70,8 @@ export default function FilterBar({
   };
 
   return (
-    <div className="relative w-full bg-black border-b border-gray-800 text-sm font-semibold text-gray-300 sticky top-[81px] z-40">
-      <div className="flex items-center justify-between w-full px-4 md:px-8 py-4">
+    <div className="relative w-full bg-black border-b border-gray-800 text-xs sm:text-sm font-semibold text-gray-300 sticky top-[61px] sm:top-[73px] md:top-[81px] z-40 backdrop-blur-md bg-black/95">
+      <div className="flex items-center justify-between w-full px-3 sm:px-6 md:px-8 py-2 sm:py-2.5">
         
         {/* Left Side: Filter Button & Pill */}
         <div className="flex items-center gap-4 flex-wrap">

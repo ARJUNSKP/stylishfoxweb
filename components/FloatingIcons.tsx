@@ -12,9 +12,10 @@ export default function FloatingIcons() {
     process.env.NEXT_PUBLIC_WHATSAPP_NUMBER ||
     DEFAULT_STORE_WHATSAPP
   ).replace(/[^0-9]/g, '');
-  const enquiryUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(
-    'Hello Stylish Fox Team, I have an inquiry regarding your heavyweight t-shirt collection.'
-  )}`;
+
+  const messageText = `Hi Stylish Fox! 👋\n\nI’m interested in your clothing collection and would like to know more about your products.\n\nCould you please share the available collections, prices and current offers?\n\nThanks.`;
+
+  const enquiryUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(messageText)}`;
 
   return (
     <div className="fixed bottom-6 right-6 z-50">
