@@ -7,6 +7,7 @@ import {
   fetchUserProfile,
   updateUserProfile,
   addUserAddress,
+  updateUserAddress,
   setActiveUserAddress,
   deleteUserAddress,
   cacheUserProfile,
@@ -50,8 +51,8 @@ interface ProfileContextType {
   token: string | null;
   isAuthModalOpen: boolean;
   setIsAuthModalOpen: (open: boolean) => void;
-  authModalMode: 'login' | 'register';
-  setAuthModalMode: (mode: 'login' | 'register') => void;
+  authModalMode: 'login' | 'register' | 'forgot-password';
+  setAuthModalMode: (mode: 'login' | 'register' | 'forgot-password') => void;
   openProfileOrAuth: () => void;
   login: (input: { email: string; password: string }) => Promise<{ success: boolean; error?: string }>;
   register: (input: {
@@ -71,6 +72,7 @@ interface ProfileContextType {
   selectedAddressId: string;
   setSelectedAddressId: (id: string) => void;
   addAddress: (addr: Omit<Address, 'id' | 'isDefault'>) => Promise<{ success: boolean; error?: string }>;
+  editAddress: (id: string, addr: Partial<Omit<Address, 'id'>>) => Promise<{ success: boolean; error?: string }>;
   deleteAddress: (id: string) => Promise<{ success: boolean; error?: string }>;
   shippingAddresses: Address[];
   selectedShippingAddressId: string;
@@ -127,7 +129,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [authModalMode, setAuthModalMode] = useState<'login' | 'register'>('login');
+  const [authModalMode, setAuthModalMode] = useState<'login' | 'register' | 'forgot-password'>('login');
   const [authModalPrompt, setAuthModalPrompt] = useState('');
 
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -575,6 +577,66 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     return { success: true };
   };
 
+  // Edit existing address and persist to database user table
+  const editAddress = async (
+    id: string,
+    updatedFields: Partial<Omit<Address, 'id'>>
+  ): Promise<{ success: boolean; error?: string }> => {
+    const index = addresses.findIndex((a) => a.id === id);
+    if (index === -1) {
+      return { success: false, error: 'Address not found' };
+    }
+
+    const currentAddr = addresses[index];
+    const mergedAddr: Address = {
+      ...currentAddr,
+      ...updatedFields,
+      id,
+    };
+
+    const nextAddresses = [...addresses];
+    nextAddresses[index] = mergedAddr;
+    setAddresses(nextAddresses);
+
+    const currentToken =
+      token || (typeof window !== 'undefined' ? localStorage.getItem('stylefox_token') : null);
+
+    if (currentToken) {
+      setIsSaving(true);
+      try {
+        const res = await updateUserAddress(currentToken, index, {
+          address: {
+            id,
+            tag: mergedAddr.tag,
+            name: mergedAddr.name,
+            phone: mergedAddr.phone,
+            street: mergedAddr.street,
+            city: mergedAddr.city,
+            state: mergedAddr.state,
+            pincode: mergedAddr.pincode,
+            isDefault: mergedAddr.isDefault,
+          },
+          ActiveAddress: mergedAddr.isDefault,
+        });
+
+        if (res.ok && res.data?.success && res.data?.data) {
+          if (Array.isArray(res.data.data.address)) {
+            const fresh = parseBackendAddresses(res.data.data.address);
+            setAddresses(fresh);
+            const active = fresh.find((a) => a.isDefault) || fresh[0];
+            if (active) setSelectedAddressId(active.id);
+          }
+        }
+      } catch (err: any) {
+        console.warn('[ProfileContext] Error updating address in backend:', err);
+      } finally {
+        setIsSaving(false);
+      }
+    }
+
+    return { success: true };
+  };
+
   // Delete address from local state and remove from database user table
   const deleteAddress = async (
     id: string
@@ -668,6 +730,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
         selectedAddressId,
         setSelectedAddressId: handleSetSelectedAddressId,
         addAddress,
+        editAddress,
         deleteAddress,
         shippingAddresses,
         selectedShippingAddressId,

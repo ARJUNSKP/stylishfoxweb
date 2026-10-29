@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import Image from 'next/image';
 import { X, Plus, Minus, Trash2, ShoppingBag, ShieldCheck, Sparkles, MessageCircle, AlertCircle } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
@@ -38,6 +38,22 @@ export default function CartDrawer() {
     setProfileDrawerInitialTab,
     setIsProfileOpen,
   } = useProfile();
+
+  // Prevent background scrolling when CartDrawer is open on mobile/desktop
+  useEffect(() => {
+    if (!isCartOpen) return;
+
+    const originalOverflow = document.body.style.overflow;
+    const originalTouchAction = document.body.style.touchAction;
+
+    document.body.style.overflow = 'hidden';
+    document.body.style.touchAction = 'none';
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      document.body.style.touchAction = originalTouchAction;
+    };
+  }, [isCartOpen]);
 
   if (!isCartOpen) return null;
 
@@ -144,7 +160,7 @@ export default function CartDrawer() {
           </div>
 
           {/* Cart Items List */}
-          <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-3.5 sm:py-4 space-y-3 sm:space-y-4">
+          <div className="flex-1 overflow-y-auto overscroll-contain touch-pan-y px-4 sm:px-6 py-3.5 sm:py-4 space-y-3 sm:space-y-4">
             {items.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center py-16">
                 <div className="w-20 h-20 rounded-full bg-zinc-900 flex items-center justify-center mb-4 border border-zinc-800">

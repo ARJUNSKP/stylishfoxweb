@@ -473,6 +473,51 @@ export async function registerUser(input: {
 }
 
 /**
+ * Check if an email address is registered
+ */
+export async function checkUserEmail(email: string) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/auth/check-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email.trim().toLowerCase() }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      data: { success: false, message: err.message || 'Network connection failed' },
+    };
+  }
+}
+
+/**
+ * Reset / update user password
+ */
+export async function resetUserPassword(input: { email: string; newPassword: string }) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/auth/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: input.email.trim().toLowerCase(),
+        newPassword: input.newPassword,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      data: { success: false, message: err.message || 'Network connection failed' },
+    };
+  }
+}
+
+/**
  * In-flight promise cache to deduplicate concurrent requests for user profile
  */
 const userProfileInFlight = new Map<string, Promise<any>>();
@@ -600,6 +645,37 @@ export async function addUserAddress(
   try {
     const res = await fetch(`${API_BASE_URL}/users/address`, {
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      invalidateUserProfileCache(token);
+    }
+    return { ok: res.ok, status: res.status, data };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      data: { success: false, message: err.message || 'Network connection failed' },
+    };
+  }
+}
+
+/**
+ * Update an existing address by index in user table via Backend API
+ */
+export async function updateUserAddress(
+  token: string,
+  index: number,
+  payload: { address: any; ActiveAddress?: boolean }
+) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/users/address/${index}`, {
+      method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,

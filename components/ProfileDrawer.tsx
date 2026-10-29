@@ -18,8 +18,9 @@ import {
   LogOut,
   AlertCircle,
   Loader2,
+  Pencil,
 } from 'lucide-react';
-import { useProfile } from '@/context/ProfileContext';
+import { useProfile, Address } from '@/context/ProfileContext';
 
 export default function ProfileDrawer() {
   const {
@@ -31,6 +32,7 @@ export default function ProfileDrawer() {
     selectedAddressId,
     setSelectedAddressId,
     addAddress,
+    editAddress,
     deleteAddress,
     isAuthenticated,
     logout,
@@ -49,8 +51,9 @@ export default function ProfileDrawer() {
   const [errorMessage, setErrorMessage] = useState('');
   const [addressNotice, setAddressNotice] = useState('');
 
-  // Address creation form states
+  // Address creation / editing form states
   const [showAddAddressForm, setShowAddAddressForm] = useState(false);
+  const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
   const [newAddr, setNewAddr] = useState({
     name: `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || '',
     phone: profile.contactNumber || '',
@@ -79,6 +82,22 @@ export default function ProfileDrawer() {
     }
   }, [isProfileOpen, profileDrawerInitialTab]);
 
+  // Prevent background scrolling when ProfileDrawer is open
+  useEffect(() => {
+    if (!isProfileOpen || !isAuthenticated) return;
+
+    const originalOverflow = document.body.style.overflow;
+    const originalTouchAction = document.body.style.touchAction;
+
+    document.body.style.overflow = 'hidden';
+    document.body.style.touchAction = 'none';
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      document.body.style.touchAction = originalTouchAction;
+    };
+  }, [isProfileOpen, isAuthenticated]);
+
   if (!isProfileOpen || !isAuthenticated) return null;
 
   const handleClose = () => {
@@ -98,18 +117,60 @@ export default function ProfileDrawer() {
     }
   };
 
-  const handleAddNewAddress = async (e: React.FormEvent) => {
+  const handleStartEditAddress = (addr: Address) => {
+    setEditingAddressId(addr.id);
+    setNewAddr({
+      name: addr.name || '',
+      phone: addr.phone || '',
+      street: addr.street || '',
+      city: addr.city || '',
+      state: addr.state || '',
+      pincode: addr.pincode || '',
+      tag: (addr.tag as 'Home' | 'Work' | 'Other') || 'Home',
+    });
+    setShowAddAddressForm(true);
+  };
+
+  const handleCancelAddressForm = () => {
+    setShowAddAddressForm(false);
+    setEditingAddressId(null);
+    setNewAddr({
+      name: `${profile.firstName} ${profile.lastName}`.trim() || '',
+      phone: profile.contactNumber || '',
+      street: '',
+      city: '',
+      state: '',
+      pincode: '',
+      tag: 'Home',
+    });
+  };
+
+  const handleSaveAddressForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAddr.street || !newAddr.city || !newAddr.pincode) {
       alert('Please fill out all address fields');
       return;
     }
-    const res = await addAddress(newAddr);
-    setShowAddAddressForm(false);
-    if (res.success) {
-      setAddressNotice('Address saved to user account in database!');
-      setTimeout(() => setAddressNotice(''), 3000);
+
+    if (editingAddressId) {
+      // Update existing address
+      const res = await editAddress(editingAddressId, newAddr);
+      setShowAddAddressForm(false);
+      setEditingAddressId(null);
+      if (res.success) {
+        setAddressNotice('Address updated successfully in database!');
+        setTimeout(() => setAddressNotice(''), 3000);
+      }
+    } else {
+      // Add new address
+      const res = await addAddress(newAddr);
+      setShowAddAddressForm(false);
+      if (res.success) {
+        setAddressNotice('Address saved to user account in database!');
+        setTimeout(() => setAddressNotice(''), 3000);
+      }
     }
+
     setNewAddr({
       name: `${profile.firstName} ${profile.lastName}`.trim() || '',
       phone: profile.contactNumber || '',
@@ -196,7 +257,7 @@ export default function ProfileDrawer() {
           </div>
 
           {/* Content Area */}
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
+          <div className="flex-1 overflow-y-auto overscroll-contain touch-pan-y p-4 sm:p-6 space-y-4 sm:space-y-6">
             {/* ================= TAB 1: MY DETAILS ================= */}
             {activeTab === 'details' && (
               <form onSubmit={handleSaveDetails} className="space-y-4">
@@ -376,7 +437,14 @@ export default function ProfileDrawer() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => setShowAddAddressForm(!showAddAddressForm)}
+                    onClick={() => {
+                      if (showAddAddressForm) {
+                        handleCancelAddressForm();
+                      } else {
+                        handleCancelAddressForm();
+                        setShowAddAddressForm(true);
+                      }
+                    }}
                     className="p-1.5 bg-[#fef08a] text-black rounded hover:bg-yellow-300 transition-colors flex items-center gap-1 text-[11px] font-bold uppercase cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
@@ -392,15 +460,25 @@ export default function ProfileDrawer() {
                   </div>
                 )}
 
-                {/* Inline New Address Form */}
+                {/* Inline New/Edit Address Form */}
                 {showAddAddressForm && (
                   <form
-                    onSubmit={handleAddNewAddress}
+                    onSubmit={handleSaveAddressForm}
                     className="p-4 bg-zinc-900 border border-zinc-700 rounded-lg space-y-3 animate-in fade-in"
                   >
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold uppercase text-[#fef08a]">
-                        Add Address
+                      <span className="text-xs font-bold uppercase text-[#fef08a] flex items-center gap-1.5">
+                        {editingAddressId ? (
+                          <>
+                            <Pencil className="w-3.5 h-3.5" />
+                            <span>Edit Address</span>
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Add Address</span>
+                          </>
+                        )}
                       </span>
                       <div className="flex gap-1.5">
                         {(['Home', 'Work', 'Other'] as const).map((t) => (
@@ -487,20 +565,29 @@ export default function ProfileDrawer() {
                       />
                     </div>
 
-                    <button
-                      type="submit"
-                      disabled={isSaving}
-                      className="w-full py-2 bg-[#fef08a] disabled:opacity-50 text-black font-bold text-xs uppercase rounded hover:bg-yellow-300 transition-colors cursor-pointer flex items-center justify-center gap-2"
-                    >
-                      {isSaving ? (
-                        <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>Saving Address to DB...</span>
-                        </>
-                      ) : (
-                        <span>Save Address</span>
-                      )}
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={handleCancelAddressForm}
+                        className="py-2 px-3 bg-zinc-800 text-zinc-300 font-bold text-xs uppercase rounded hover:bg-zinc-700 transition-colors cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isSaving}
+                        className="flex-1 py-2 bg-[#fef08a] disabled:opacity-50 text-black font-bold text-xs uppercase rounded hover:bg-yellow-300 transition-colors cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        {isSaving ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>{editingAddressId ? 'Updating Address in DB...' : 'Saving Address to DB...'}</span>
+                          </>
+                        ) : (
+                          <span>{editingAddressId ? 'Update Address' : 'Save Address'}</span>
+                        )}
+                      </button>
+                    </div>
                   </form>
                 )}
 
@@ -549,19 +636,35 @@ export default function ProfileDrawer() {
                               </span>
                             </div>
 
-                            {addresses.length > 1 && (
+                            <div className="flex items-center gap-1">
+                              {/* Edit Button */}
                               <button
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  deleteAddress(addr.id);
+                                  handleStartEditAddress(addr);
                                 }}
-                                className="text-zinc-500 hover:text-red-400 p-1 transition-colors"
-                                title="Delete address"
+                                className="text-zinc-400 hover:text-[#fef08a] p-1.5 hover:bg-zinc-800 rounded transition-colors"
+                                title="Edit address"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                <Pencil className="w-3.5 h-3.5" />
                               </button>
-                            )}
+
+                              {/* Delete Button */}
+                              {addresses.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    deleteAddress(addr.id);
+                                  }}
+                                  className="text-zinc-500 hover:text-red-400 p-1.5 hover:bg-zinc-800 rounded transition-colors"
+                                  title="Delete address"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
                           </div>
 
                           <p className="text-xs text-zinc-300 leading-relaxed pl-6">
