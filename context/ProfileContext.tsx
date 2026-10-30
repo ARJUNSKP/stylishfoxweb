@@ -12,6 +12,7 @@ import {
   deleteUserAddress,
   cacheUserProfile,
   invalidateUserProfileCache,
+  refreshAuthToken,
 } from '@/utils/api';
 
 export interface Address {
@@ -49,6 +50,8 @@ interface ProfileContextType {
   isAuthenticated: boolean;
   user: AuthUser | null;
   token: string | null;
+  refreshToken: string | null;
+  refreshSession: () => Promise<boolean>;
   isAuthModalOpen: boolean;
   setIsAuthModalOpen: (open: boolean) => void;
   authModalMode: 'login' | 'register' | 'forgot-password';
@@ -128,6 +131,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [refreshToken, setRefreshToken] = useState<string | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<'login' | 'register' | 'forgot-password'>('login');
   const [authModalPrompt, setAuthModalPrompt] = useState('');
@@ -139,6 +143,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const isHydrated = useRef(false);
   const hasSyncedInitialProfile = useRef(false);
   const isSyncingProfile = useRef(false);
+  const isRefreshingToken = useRef(false);
 
   // Profile data defaults to empty until user logs in or registers
   const [profile, setProfile] = useState<UserProfile>(emptyProfile);
@@ -214,6 +219,54 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     return true;
   };
 
+  // Refresh session using refreshToken to get a fresh access token
+  const refreshSession = async (): Promise<boolean> => {
+    if (isRefreshingToken.current) return false;
+    isRefreshingToken.current = true;
+    try {
+      const storedRefresh =
+        refreshToken ||
+        (typeof window !== 'undefined' ? localStorage.getItem('stylefox_refresh_token') : null);
+
+      if (!storedRefresh) {
+        return false;
+      }
+
+      const res = await refreshAuthToken(storedRefresh);
+      if (res.ok && res.data?.success && res.data?.data) {
+        const { accessToken: newAccess, refreshToken: newRefresh, user: updatedUser } = res.data.data;
+        const freshToken = newAccess || res.data.data.token;
+
+        setToken(freshToken);
+        if (newRefresh) {
+          setRefreshToken(newRefresh);
+        }
+        if (updatedUser) {
+          setUser((prev) => (prev ? { ...prev, ...updatedUser } : updatedUser));
+        }
+
+        try {
+          localStorage.setItem('stylefox_token', freshToken);
+          localStorage.setItem('token', freshToken);
+          if (newRefresh) {
+            localStorage.setItem('stylefox_refresh_token', newRefresh);
+          }
+        } catch {}
+
+        return true;
+      } else {
+        // If refresh token is expired or invalid, log out
+        console.warn('[ProfileContext] Refresh token expired or rejected');
+        return false;
+      }
+    } catch (err) {
+      console.warn('[ProfileContext] Error refreshing access token:', err);
+      return false;
+    } finally {
+      isRefreshingToken.current = false;
+    }
+  };
+
   // Sync fresh profile & addresses from Backend DB with deduplication guard
   const syncProfileFromBackend = async (jwtToken: string, forceFresh: boolean = false) => {
     if (!jwtToken || isSyncingProfile.current) return;
@@ -249,6 +302,12 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
             setSelectedAddressId(activeOne.id);
           }
         }
+      } else if (res.status === 401) {
+        // Access token expired! Attempt automatic refresh using refresh token
+        const refreshed = await refreshSession();
+        if (!refreshed) {
+          logout();
+        }
       }
     } catch (err) {
       console.warn('[ProfileContext] Error syncing profile from backend:', err);
@@ -261,8 +320,13 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try {
       const savedToken = localStorage.getItem('stylefox_token');
+      const savedRefreshToken = localStorage.getItem('stylefox_refresh_token');
       const savedUser = localStorage.getItem('stylefox_user');
       const savedProfile = localStorage.getItem('stylefox_profile');
+
+      if (savedRefreshToken) {
+        setRefreshToken(savedRefreshToken);
+      }
 
       if (savedToken && savedUser) {
         setToken(savedToken);
@@ -367,7 +431,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const login = async (input: { email: string; password: string }) => {
     const res = await loginUser(input);
     if (res.ok && res.data.success && res.data.data) {
-      const { user: userData, token: jwtToken } = res.data.data;
+      const { user: userData, token: jwtToken, refreshToken: newRefreshToken } = res.data.data;
       const names = (userData.name || '').trim().split(/\s+/);
       const newProfile: UserProfile = {
         firstName: names[0] || 'Member',
@@ -379,6 +443,9 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
       };
 
       setToken(jwtToken);
+      if (newRefreshToken) {
+        setRefreshToken(newRefreshToken);
+      }
       setUser(userData);
       setProfile(newProfile);
       setIsAuthenticated(true);
@@ -393,6 +460,10 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
 
       try {
         localStorage.setItem('stylefox_token', jwtToken);
+        localStorage.setItem('token', jwtToken);
+        if (newRefreshToken) {
+          localStorage.setItem('stylefox_refresh_token', newRefreshToken);
+        }
         localStorage.setItem('stylefox_user', JSON.stringify(userData));
         localStorage.setItem('stylefox_profile', JSON.stringify(newProfile));
       } catch {}
@@ -420,7 +491,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   }) => {
     const res = await registerUser(input);
     if (res.ok && res.data.success && res.data.data) {
-      const { user: userData, token: jwtToken } = res.data.data;
+      const { user: userData, token: jwtToken, refreshToken: newRefreshToken } = res.data.data;
       const names = (userData.name || input.name || '').trim().split(/\s+/);
       const newProfile: UserProfile = {
         firstName: names[0] || 'Member',
@@ -432,6 +503,9 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
       };
 
       setToken(jwtToken);
+      if (newRefreshToken) {
+        setRefreshToken(newRefreshToken);
+      }
       setUser(userData);
       setProfile(newProfile);
       setIsAuthenticated(true);
@@ -439,6 +513,10 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
 
       try {
         localStorage.setItem('stylefox_token', jwtToken);
+        localStorage.setItem('token', jwtToken);
+        if (newRefreshToken) {
+          localStorage.setItem('stylefox_refresh_token', newRefreshToken);
+        }
         localStorage.setItem('stylefox_user', JSON.stringify(userData));
         localStorage.setItem('stylefox_profile', JSON.stringify(newProfile));
       } catch {}
@@ -462,6 +540,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     setIsAuthenticated(false);
     setUser(null);
     setToken(null);
+    setRefreshToken(null);
     setProfile(emptyProfile);
     setAddresses([]);
     setSelectedAddressId('');
@@ -470,6 +549,8 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     invalidateUserProfileCache(token || undefined);
     try {
       localStorage.removeItem('stylefox_token');
+      localStorage.removeItem('token');
+      localStorage.removeItem('stylefox_refresh_token');
       localStorage.removeItem('stylefox_user');
       localStorage.removeItem('stylefox_profile');
       localStorage.removeItem('stylefox_addresses');
@@ -714,6 +795,8 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
         isAuthenticated,
         user,
         token,
+        refreshToken,
+        refreshSession,
         isAuthModalOpen,
         setIsAuthModalOpen,
         authModalMode,

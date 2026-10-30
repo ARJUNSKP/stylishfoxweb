@@ -20,15 +20,25 @@ import {
   Mail,
   Phone,
   RefreshCw,
+  Save,
+  Loader2,
+  Check,
+  RotateCcw,
 } from 'lucide-react';
 import { Product } from '@/data/products';
-import { fetchAdminUsers } from '@/utils/api';
+import {
+  fetchAdminUsers,
+  recordAdminInvoiceSale,
+  fetchNextInvoiceNumber,
+  resetInvoiceCounterApi,
+} from '@/utils/api';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 export interface InvoiceLineItem {
   id: string;
   productId: string;
+  variantId?: string;
   name: string;
   size?: string;
   color?: string;
@@ -67,6 +77,7 @@ interface InvoiceModalProps {
   onClose: () => void;
   products: Product[];
   token?: string;
+  onSaleSaved?: () => Promise<void> | void;
 }
 
 export default function InvoiceModal({
@@ -74,6 +85,7 @@ export default function InvoiceModal({
   onClose,
   products = [],
   token = '',
+  onSaleSaved,
 }: InvoiceModalProps) {
   // -------------------------------------------------------------
   // Users state & loading
@@ -106,6 +118,7 @@ export default function InvoiceModal({
   // Product Selector State
   // -------------------------------------------------------------
   const [selectedProductId, setSelectedProductId] = useState('');
+  const [selectedVariantId, setSelectedVariantId] = useState('');
   const [productName, setProductName] = useState('');
   const [productOriginalPrice, setProductOriginalPrice] = useState<number>(0);
   const [productSellingPrice, setProductSellingPrice] = useState<number>(0);
@@ -116,9 +129,12 @@ export default function InvoiceModal({
   const [availableColors, setAvailableColors] = useState<string[]>([]);
 
   // -------------------------------------------------------------
-  // Invoice Items List & Logo
+  // Invoice Items List, Logo, and Save State
   // -------------------------------------------------------------
   const [invoiceItems, setInvoiceItems] = useState<InvoiceLineItem[]>([]);
+  const [isSavingSale, setIsSavingSale] = useState(false);
+  const [isSaleSaved, setIsSaleSaved] = useState(false);
+  const [isResettingCounter, setIsResettingCounter] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(
     null
   );
@@ -136,29 +152,34 @@ export default function InvoiceModal({
         reader.onloadend = () => {
           if (!isSubscribed || typeof reader.result !== 'string') return;
           const rawDataUrl = reader.result;
-          const img = new window.Image();
-          img.onload = () => {
-            try {
-              const targetW = 500;
-              const targetH = Math.round(targetW * (img.naturalHeight / img.naturalWidth));
-              const canvas = document.createElement('canvas');
-              canvas.width = targetW;
-              canvas.height = targetH;
-              const ctx = canvas.getContext('2d');
-              if (ctx) {
-                ctx.drawImage(img, 0, 0, targetW, targetH);
-                if (isSubscribed) setLogoDataUrl(canvas.toDataURL('image/png'));
-              } else if (isSubscribed) {
-                setLogoDataUrl(rawDataUrl);
-              }
-            } catch {
+
+          // Downscale huge 11000px image to manageable ~600px width for fast rendering in PDF and Print
+          try {
+            const img = new window.Image();
+            img.onload = () => {
+              try {
+                const targetW = 600;
+                const targetH = Math.max(1, Math.round(targetW * (img.naturalHeight / (img.naturalWidth || 1))));
+                const canvas = document.createElement('canvas');
+                canvas.width = targetW;
+                canvas.height = targetH;
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                  ctx.drawImage(img, 0, 0, targetW, targetH);
+                  const optimizedDataUrl = canvas.toDataURL('image/png');
+                  if (isSubscribed) setLogoDataUrl(optimizedDataUrl);
+                  return;
+                }
+              } catch {}
               if (isSubscribed) setLogoDataUrl(rawDataUrl);
-            }
-          };
-          img.onerror = () => {
+            };
+            img.onerror = () => {
+              if (isSubscribed) setLogoDataUrl(rawDataUrl);
+            };
+            img.src = rawDataUrl;
+          } catch {
             if (isSubscribed) setLogoDataUrl(rawDataUrl);
-          };
-          img.src = rawDataUrl;
+          }
         };
         reader.readAsDataURL(blob);
       } catch (err) {
@@ -172,15 +193,110 @@ export default function InvoiceModal({
     };
   }, []);
 
+  // Company Details for Invoice
+  const companyInfo = {
+    name: 'Stylish Fox',
+    tagline: 'MODERN STREETWEAR AESTHETIC',
+    addressLine1: 'Mattakkara, Kottayam',
+    addressLine2: 'Kerala 686564, India',
+    fullAddress: 'Stylish Fox, Mattakkara, Kottayam, Kerala 686564, India',
+    email: 'Stylishfoxofficial@gmail.com',
+    phone: '+91 7012067285',
+    website: 'www.stylishfox.in',
+  };
+
+  // Helper: Prepare form for a new invoice (resets products and fetches next sequential number)
+  const handleNewInvoice = async (keepCustomer = false) => {
+    const today = new Date().toISOString().split('T')[0];
+    setInvoiceDate(today);
+    setIsSaleSaved(false);
+    setInvoiceItems([]);
+    setSelectedProductId('');
+    setSelectedVariantId('');
+    setProductName('');
+    setProductOriginalPrice(0);
+    setProductSellingPrice(0);
+    setProductQuantity(1);
+    setProductSize('');
+    setProductColor('');
+
+    if (!keepCustomer) {
+      setSelectedUserId('');
+      setCustomerName('');
+      setCustomerEmail('');
+      setCustomerPhone('');
+      setCustomerAddress('');
+      setUserSavedAddresses([]);
+    }
+
+    const effectiveToken =
+      token || (typeof window !== 'undefined' ? localStorage.getItem('token') || '' : '');
+
+    try {
+      const nextInv = await fetchNextInvoiceNumber(effectiveToken);
+      setInvoiceNumber(nextInv || 'SF-INV-00001');
+      showToast('success', `Created new blank invoice: ${nextInv || 'SF-INV-00001'}`);
+    } catch {
+      setInvoiceNumber('SF-INV-00001');
+    }
+  };
+
+  // Helper: Reset counter completely back to SF-INV-00001
+  const handleResetCounter = async () => {
+    if (
+      !window.confirm(
+        'Are you sure you want to reset the invoice counter to SF-INV-00001? This will restart numbering from SF-INV-00001 for future invoices.'
+      )
+    ) {
+      return;
+    }
+
+    const effectiveToken =
+      token || (typeof window !== 'undefined' ? localStorage.getItem('token') || '' : '');
+    if (!effectiveToken) {
+      showToast('error', 'Admin authorization token missing. Please sign in again.');
+      return;
+    }
+
+    setIsResettingCounter(true);
+    try {
+      const nextNum = await resetInvoiceCounterApi(effectiveToken);
+      setInvoiceNumber(nextNum || 'SF-INV-00001');
+      setIsSaleSaved(false);
+      showToast('success', 'Invoice counter reset to SF-INV-00001');
+      if (onSaleSaved) {
+        await onSaleSaved();
+      }
+    } catch (err: any) {
+      showToast('error', err.message || 'Failed to reset invoice counter');
+    } finally {
+      setIsResettingCounter(false);
+    }
+  };
+
   // Initialize Invoice defaults when opened
   useEffect(() => {
+    let isCancelled = false;
     if (isOpen) {
       const today = new Date().toISOString().split('T')[0];
       setInvoiceDate(today);
-      const randomId = Math.floor(100000 + Math.random() * 900000);
-      setInvoiceNumber(`SF-INV-${randomId}`);
+      setIsSaleSaved(false);
+
+      const effectiveToken =
+        token || (typeof window !== 'undefined' ? localStorage.getItem('token') || '' : '');
+
+      // Load next sequential invoice number starting at SF-INV-00001
+      fetchNextInvoiceNumber(effectiveToken).then((nextInv) => {
+        if (!isCancelled) {
+          setInvoiceNumber(nextInv || 'SF-INV-00001');
+        }
+      });
+
       loadUsers();
     }
+    return () => {
+      isCancelled = true;
+    };
   }, [isOpen]);
 
   // Load all users for the dropdown
@@ -278,10 +394,41 @@ export default function InvoiceModal({
     showToast('success', `Customer details & address auto-filled for ${foundUser.name}`);
   };
 
+  // Helper to find matching variant in product
+  const findMatchingVariant = (
+    prod: Product | undefined,
+    colorName?: string,
+    sizeName?: string
+  ) => {
+    if (!prod || !Array.isArray(prod.variants) || prod.variants.length === 0) return null;
+    const cTarget = (colorName || '').toLowerCase().trim();
+    const sTarget = (sizeName || '').toLowerCase().trim();
+
+    // 1. Exact match on both color and size
+    const exact = prod.variants.find((v: any) => {
+      const vColor = (v.color?.name || v.colorName || '').toLowerCase().trim();
+      const vSize = (v.size?.code || v.size?.name || v.sizeCode || '').toLowerCase().trim();
+      const matchC = !cTarget || cTarget === 'standard' || !vColor || vColor === 'standard' || vColor === cTarget;
+      const matchS = !sTarget || sTarget === 'standard' || !vSize || vSize === 'standard' || vSize === sTarget;
+      return matchC && matchS;
+    });
+    if (exact) return exact;
+
+    // 2. Match on color only
+    const colorMatch = prod.variants.find((v: any) => {
+      const vColor = (v.color?.name || v.colorName || '').toLowerCase().trim();
+      return vColor && vColor === cTarget;
+    });
+    if (colorMatch) return colorMatch;
+
+    return prod.variants[0] || null;
+  };
+
   // When a product is selected from dropdown
   const handleSelectProduct = (productId: string) => {
     setSelectedProductId(productId);
     if (!productId) {
+      setSelectedVariantId('');
       setProductName('');
       setProductOriginalPrice(0);
       setProductSellingPrice(0);
@@ -298,18 +445,11 @@ export default function InvoiceModal({
 
     setProductName(found.name || 'Product');
 
-    // Resolve prices
-    const orig = found.originalPrice || Math.round((found.price || 1299) * 1.4);
-    const selling = found.sellingPrice || found.price || 1299;
-
-    setProductOriginalPrice(orig);
-    setProductSellingPrice(selling);
-    setProductQuantity(1);
-
     // Sizes
     const sizes = Array.isArray(found.sizes) && found.sizes.length > 0 ? found.sizes : ['Standard'];
     setAvailableSizes(sizes);
-    setProductSize(sizes[0] || 'Standard');
+    const initialSize = sizes[0] || 'Standard';
+    setProductSize(initialSize);
 
     // Colors
     const colors =
@@ -317,7 +457,30 @@ export default function InvoiceModal({
         ? found.colors.map((c) => c.name)
         : ['Standard'];
     setAvailableColors(colors);
-    setProductColor(colors[0] || 'Standard');
+    const initialColor = colors[0] || 'Standard';
+    setProductColor(initialColor);
+
+    // Match variant to resolve accurate pricing
+    const matchedVariant = findMatchingVariant(found, initialColor, initialSize);
+    if (matchedVariant) {
+      setSelectedVariantId(matchedVariant.id || '');
+      const vPrice = parseFloat(matchedVariant.price);
+      const vSelling = parseFloat(matchedVariant.sellingPrice ?? matchedVariant.selling_price);
+
+      const resolvedOrig = !isNaN(vPrice) && vPrice > 0 ? vPrice : found.originalPrice || 1999;
+      const resolvedSell = !isNaN(vSelling) && vSelling > 0 ? vSelling : (!isNaN(vPrice) && vPrice > 0 ? vPrice : found.sellingPrice || found.price || 1299);
+
+      setProductOriginalPrice(resolvedOrig);
+      setProductSellingPrice(resolvedSell);
+    } else {
+      setSelectedVariantId('');
+      const orig = found.originalPrice || Math.round((found.price || 1299) * 1.4);
+      const selling = found.sellingPrice || found.price || 1299;
+      setProductOriginalPrice(orig);
+      setProductSellingPrice(selling);
+    }
+
+    setProductQuantity(1);
   };
 
   // Auto-calculated discount for selected item
@@ -338,6 +501,11 @@ export default function InvoiceModal({
       return;
     }
 
+    // Resolve variant ID if not set
+    const foundProd = products.find((p) => String(p.id) === String(selectedProductId));
+    const matchedV = findMatchingVariant(foundProd, productColor, productSize);
+    const variantIdToSave = selectedVariantId || matchedV?.id || '';
+
     // Check if same product with same size & color already in table
     const existingIndex = invoiceItems.findIndex(
       (item) =>
@@ -354,6 +522,7 @@ export default function InvoiceModal({
         const newQty = existing.quantity + productQuantity;
         next[existingIndex] = {
           ...existing,
+          variantId: existing.variantId || variantIdToSave,
           quantity: newQty,
           totalAmount: existing.sellingPrice * newQty,
           totalDiscount: existing.discountAmount * newQty,
@@ -371,6 +540,7 @@ export default function InvoiceModal({
       const newItem: InvoiceLineItem = {
         id: `item-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         productId: selectedProductId,
+        variantId: variantIdToSave,
         name: productName,
         size: productSize,
         color: productColor,
@@ -388,6 +558,7 @@ export default function InvoiceModal({
 
     // Reset selector
     setSelectedProductId('');
+    setSelectedVariantId('');
     setProductName('');
     setProductOriginalPrice(0);
     setProductSellingPrice(0);
@@ -453,6 +624,69 @@ export default function InvoiceModal({
   };
 
   // -------------------------------------------------------------
+  // Save Invoice & Deduct Variant Stock in DB (sales_details & product_variants)
+  // -------------------------------------------------------------
+  const handleSaveInvoiceToDb = async () => {
+    if (invoiceItems.length === 0) {
+      showToast('error', 'Please add at least one product before saving.');
+      return;
+    }
+    if (!customerName.trim()) {
+      showToast('error', 'Please enter or select a customer name.');
+      return;
+    }
+
+    const effectiveToken =
+      token || (typeof window !== 'undefined' ? localStorage.getItem('token') || '' : '');
+    if (!effectiveToken) {
+      showToast('error', 'Admin authorization token missing. Please sign in again.');
+      return;
+    }
+
+    setIsSavingSale(true);
+    try {
+      const payload = {
+        invoiceNumber,
+        userId: selectedUserId || null,
+        customerName: customerName.trim(),
+        customerEmail: customerEmail.trim() || null,
+        customerPhone: customerPhone.trim() || null,
+        customerAddress: customerAddress.trim() || null,
+        paymentMethod,
+        paymentStatus,
+        notes: notes.trim() || null,
+        items: invoiceItems.map((item) => ({
+          productId: item.productId || null,
+          variantId: item.variantId || null,
+          productName: item.name,
+          size: item.size || null,
+          color: item.color || null,
+          quantity: item.quantity,
+          originalPrice: item.originalPrice,
+          sellingPrice: item.sellingPrice,
+          discountAmount: item.discountAmount,
+          totalAmount: item.totalAmount,
+        })),
+      };
+
+      const res = await recordAdminInvoiceSale(effectiveToken, payload);
+      if (res.ok) {
+        setIsSaleSaved(true);
+        showToast('success', 'Invoice sale recorded to sales_details & product variant stock reduced!');
+        if (onSaleSaved) {
+          await onSaleSaved();
+        }
+      } else {
+        showToast('error', res.data?.message || 'Failed to record invoice sale in database.');
+      }
+    } catch (err: any) {
+      showToast('error', err.message || 'Error occurred while saving invoice sale.');
+    } finally {
+      setIsSavingSale(false);
+    }
+  };
+
+  // -------------------------------------------------------------
   // Generate & Download PDF with jsPDF (Saved with User's Name)
   // -------------------------------------------------------------
   const handleSavePDF = () => {
@@ -473,11 +707,11 @@ export default function InvoiceModal({
 
       // 1. Header Bar
       doc.setFillColor(15, 23, 42); // slate-900 (#0f172a)
-      doc.rect(0, 0, pageWidth, 42, 'F');
+      doc.rect(0, 0, pageWidth, 48, 'F');
 
       // Accent line
       doc.setFillColor(250, 204, 21); // yellow-400 (#facc15)
-      doc.rect(0, 42, pageWidth, 2.5, 'F');
+      doc.rect(0, 48, pageWidth, 2.5, 'F');
 
       // Brand Logo
       if (logoDataUrl) {
@@ -495,16 +729,17 @@ export default function InvoiceModal({
         doc.text('STYLEFOX', margin, 17);
       }
 
-      // Title/Tagline, Email, and Website Domain URL placed at the bottom of the logo
+      // Title/Tagline, Company Address, Email & Website placed on the left header
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(7.5);
       doc.setTextColor(226, 232, 240); // slate-200
-      doc.text('MODERN STREETWEAR AESTHETIC', margin, 29);
+      doc.text(companyInfo.tagline, margin, 27);
 
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7.5);
+      doc.setFontSize(7);
       doc.setTextColor(203, 213, 225); // slate-300
-      doc.text('support@stylefox.com  |  www.stylefox.com', margin, 35);
+      doc.text(`${companyInfo.name} - ${companyInfo.addressLine1}, ${companyInfo.addressLine2}`, margin, 33);
+      doc.text(`${companyInfo.email}  |  ${companyInfo.phone}  |  ${companyInfo.website}`, margin, 39);
 
       // Invoice Label & Meta (Right Aligned)
       doc.setFont('helvetica', 'bold');
@@ -519,7 +754,7 @@ export default function InvoiceModal({
       doc.text(`Date: ${invoiceDate}`, pageWidth - margin, 31, { align: 'right' });
 
       // 2. Info Boxes (Customer & Invoice meta)
-      let currentY = 50;
+      let currentY = 56;
       const boxHeight = 36;
       const colWidth = (pageWidth - margin * 2 - 8) / 2;
 
@@ -777,6 +1012,11 @@ export default function InvoiceModal({
               font-size: 13px;
               line-height: 1.5;
             }
+            @media print {
+              body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              .brand-logo-box { -webkit-print-color-adjust: exact; print-color-adjust: exact; background-color: #09090b !important; }
+              th { -webkit-print-color-adjust: exact; print-color-adjust: exact; background-color: #0f172a !important; color: #ffffff !important; }
+            }
             .header-bar {
               display: flex;
               justify-content: space-between;
@@ -792,17 +1032,19 @@ export default function InvoiceModal({
               gap: 6px;
             }
             .brand-logo-box {
-              background: #09090b;
-              padding: 6px 14px;
+              background-color: #09090b !important;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+              padding: 8px 16px;
               border-radius: 8px;
               display: inline-flex;
               align-items: center;
               justify-content: center;
             }
             .brand-logo-box img {
-              height: 40px;
+              height: 44px;
               width: auto;
-              max-width: 140px;
+              max-width: 160px;
               object-fit: contain;
               display: block;
             }
@@ -817,6 +1059,10 @@ export default function InvoiceModal({
               color: #334155;
               text-transform: uppercase;
               letter-spacing: 0.8px;
+            }
+            .brand-address {
+              font-size: 11px;
+              color: #475569;
             }
             .brand-contact {
               font-size: 11px;
@@ -876,8 +1122,10 @@ export default function InvoiceModal({
               margin-bottom: 24px;
             }
             th {
-              background: #0f172a;
-              color: #ffffff;
+              background-color: #0f172a !important;
+              color: #ffffff !important;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
               text-align: left;
               padding: 10px 12px;
               font-size: 11px;
@@ -934,11 +1182,12 @@ export default function InvoiceModal({
           <div class="header-bar">
             <div class="brand-wrap">
               <div class="brand-logo-box">
-                <img src="${logoDataUrl || '/logo.png'}" alt="StyleFox Logo" />
+                <img id="invoiceLogo" src="${logoDataUrl || (typeof window !== 'undefined' ? `${window.location.origin}/logo.png` : '/logo.png')}" alt="StyleFox" />
               </div>
               <div class="brand-meta">
-                <div class="brand-tagline">MODERN STREETWEAR AESTHETIC</div>
-                <div class="brand-contact">support@stylefox.com &bull; www.stylefox.com</div>
+                <div class="brand-tagline">${companyInfo.tagline}</div>
+                <div class="brand-address"><strong>${companyInfo.name}</strong> &bull; ${companyInfo.addressLine1}, ${companyInfo.addressLine2}</div>
+                <div class="brand-contact">${companyInfo.email} &bull; ${companyInfo.phone} &bull; ${companyInfo.website}</div>
               </div>
             </div>
             <div class="invoice-meta">
@@ -1018,16 +1267,27 @@ export default function InvoiceModal({
             <span>This is a computer generated invoice and requires no physical signature.</span>
             <span>StyleFox Apparel &bull; Wear Your Boldness</span>
           </div>
+
+          <script>
+            // Ensure image is fully loaded before triggering print dialog
+            const img = document.getElementById('invoiceLogo');
+            function doPrint() {
+              window.focus();
+              window.print();
+            }
+            if (img && !img.complete) {
+              img.onload = () => setTimeout(doPrint, 250);
+              img.onerror = () => setTimeout(doPrint, 250);
+            } else {
+              setTimeout(doPrint, 300);
+            }
+          </script>
         </body>
       </html>
     `;
 
     printWindow.document.write(htmlContent);
     printWindow.document.close();
-    printWindow.focus();
-    setTimeout(() => {
-      printWindow.print();
-    }, 400);
   };
 
   if (!isOpen) return null;
@@ -1053,8 +1313,7 @@ export default function InvoiceModal({
                 </span>
               </h2>
               <p className="text-xs text-zinc-400">
-                Select customer, auto-fill address, add products, print, and save PDF with customer
-                name.
+                {companyInfo.name} &bull; {companyInfo.addressLine1}, {companyInfo.addressLine2} &bull; {companyInfo.phone}
               </p>
             </div>
           </div>
@@ -1508,9 +1767,21 @@ export default function InvoiceModal({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <div>
-                  <label className="block text-[11px] font-semibold text-zinc-400 mb-1.5">
-                    Invoice Number
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-[11px] font-semibold text-zinc-400">
+                      Invoice Number
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleResetCounter}
+                      disabled={isResettingCounter}
+                      className="text-[10px] text-zinc-400 hover:text-[#fef08a] flex items-center gap-1 transition-colors cursor-pointer"
+                      title="Reset invoice counter back to SF-INV-00001"
+                    >
+                      <RotateCcw className={`w-3 h-3 ${isResettingCounter ? 'animate-spin text-[#fef08a]' : ''}`} />
+                      <span>Reset to SF-INV-00001</span>
+                    </button>
+                  </div>
                   <input
                     type="text"
                     value={invoiceNumber}
@@ -1690,27 +1961,73 @@ export default function InvoiceModal({
               Close
             </button>
 
-            {/* Print Option */}
+            {/* 1. Save Invoice Button (Adds to sales_details & Reduces Variant Stock) */}
             <button
               type="button"
-              onClick={handlePrint}
-              disabled={invoiceItems.length === 0}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 hover:border-zinc-500 text-white hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-bold transition-all shadow-md cursor-pointer"
+              onClick={handleSaveInvoiceToDb}
+              disabled={invoiceItems.length === 0 || isSavingSale || isSaleSaved}
+              className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black transition-all shadow-xl cursor-pointer ${
+                isSaleSaved
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 cursor-default'
+                  : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-900/30 disabled:opacity-40 disabled:cursor-not-allowed'
+              }`}
             >
-              <Printer className="w-4 h-4 text-[#fef08a]" />
-              <span>Print Invoice</span>
+              {isSavingSale ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-black" />
+                  <span>Saving Sale...</span>
+                </>
+              ) : isSaleSaved ? (
+                <>
+                  <Check className="w-4 h-4 text-emerald-400" />
+                  <span>Saved</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  <span>Save Invoice</span>
+                </>
+              )}
             </button>
 
-            {/* Save PDF Option (With User's Name as Filename) */}
-            <button
-              type="button"
-              onClick={handleSavePDF}
-              disabled={invoiceItems.length === 0}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#fef08a] hover:bg-yellow-300 disabled:opacity-40 disabled:cursor-not-allowed text-black text-xs font-black transition-all shadow-xl shadow-yellow-900/20 cursor-pointer"
-            >
-              <Download className="w-4 h-4" />
-              <span>Save PDF ({customerName.trim() ? customerName.trim() : 'User'})</span>
-            </button>
+            {/* 2. Print Option (Displays once invoice is saved) */}
+            {isSaleSaved && (
+              <button
+                type="button"
+                onClick={handlePrint}
+                disabled={invoiceItems.length === 0}
+                className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 hover:border-zinc-500 text-white hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-bold transition-all shadow-md cursor-pointer animate-in fade-in zoom-in-95 duration-150"
+              >
+                <Printer className="w-4 h-4 text-[#fef08a]" />
+                <span>Print Invoice</span>
+              </button>
+            )}
+
+            {/* 3. Save PDF Option (Displays once invoice is saved) */}
+            {isSaleSaved && (
+              <button
+                type="button"
+                onClick={handleSavePDF}
+                disabled={invoiceItems.length === 0}
+                className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#fef08a] hover:bg-yellow-300 disabled:opacity-40 disabled:cursor-not-allowed text-black text-xs font-black transition-all shadow-xl shadow-yellow-900/20 cursor-pointer animate-in fade-in zoom-in-95 duration-150"
+              >
+                <Download className="w-4 h-4" />
+                <span>Save PDF</span>
+              </button>
+            )}
+
+            {/* 4. Clear button to create new invoice */}
+            {isSaleSaved && (
+              <button
+                type="button"
+                onClick={() => handleNewInvoice(false)}
+                className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 text-zinc-200 hover:text-white text-xs font-bold transition-all shadow-md cursor-pointer animate-in fade-in zoom-in-95 duration-150"
+                title="Clear current invoice and start a new one"
+              >
+                <RotateCcw className="w-4 h-4 text-zinc-400 group-hover:text-white" />
+                <span>New Invoice</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

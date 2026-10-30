@@ -107,6 +107,8 @@ export default function ProductDetailClient({
   const imageContainerRef = React.useRef<HTMLDivElement>(null);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Only enable hover zoom on desktop / pointer:fine devices
+    if (typeof window !== 'undefined' && window.innerWidth < 768) return;
     if (!imageContainerRef.current) return;
     const rect = imageContainerRef.current.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100;
@@ -117,7 +119,10 @@ export default function ProductDetailClient({
     });
   };
 
-  const handleMouseEnter = () => setIsZoomed(true);
+  const handleMouseEnter = () => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) return;
+    setIsZoomed(true);
+  };
   const handleMouseLeave = () => {
     setIsZoomed(false);
     setZoomPosition({ x: 50, y: 50 });
@@ -460,14 +465,13 @@ export default function ProductDetailClient({
             })}
           </div>
 
-          {/* Large Main Feature Image Display with Mouse Hover Zoom (Inner Zoom Only) */}
+          {/* Large Main Feature Image Display with Mouse Hover Zoom (Desktop only) */}
           <div
             ref={imageContainerRef}
             onMouseMove={handleMouseMove}
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
-            className="flex-1 relative aspect-[3/4] sm:aspect-[4/5] lg:aspect-[3/4] lg:max-h-[calc(100vh-8rem)] bg-zinc-950 rounded-lg sm:rounded-xl overflow-hidden border border-zinc-800/80 shadow-2xl group cursor-crosshair select-none touch-none"
-            style={{ overscrollBehavior: 'contain' }}
+            className="flex-1 relative aspect-[3/4] sm:aspect-[4/5] lg:aspect-[3/4] lg:max-h-[calc(100vh-8rem)] bg-zinc-950 rounded-lg sm:rounded-xl overflow-hidden border border-zinc-800/80 shadow-2xl group lg:cursor-crosshair select-none"
           >
             {currentDisplayType === 2 ? (
               <div className="absolute top-4 left-4 z-20 bg-orange-500 text-white text-xs font-black uppercase tracking-wider px-3 py-1 rounded shadow-lg flex items-center gap-1.5 shadow-orange-500/30 pointer-events-none">

@@ -3283,7 +3283,7 @@ export default function AdminDashboardPage() {
                       <label className="flex items-center gap-2 text-[11px] font-bold text-zinc-300 uppercase tracking-wider">
                         <span>Variant Images <span className="text-red-400">*</span></span>
                         <span className="px-1.5 py-0.5 rounded bg-[#fef08a]/10 border border-[#fef08a]/30 text-[9px] font-mono text-[#fef08a]">
-                          Cloudflare R2 • Max 5 MB
+                          Cloudflare • Max 5 MB
                         </span>
                       </label>
                       <span className="text-[10px] text-zinc-500 font-mono">
@@ -3927,7 +3927,7 @@ export default function AdminDashboardPage() {
                     <label className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-zinc-400">
                       <span>Variant Images <span className="text-red-400">*</span></span>
                       <span className="px-1.5 py-0.5 rounded bg-amber-400/10 border border-amber-400/30 text-[9px] font-mono text-[#fef08a]">
-                        Cloudflare R2 • Max 5 MB
+                        Cloudflare  Max 5 MB
                       </span>
                     </label>
                     <span className="text-[10px] text-zinc-500 font-mono">
@@ -4004,51 +4004,20 @@ export default function AdminDashboardPage() {
                 </div>
 
                 {/* Form Action Footer */}
-                <div className="flex items-center justify-between gap-3 pt-3 border-t border-zinc-900 mt-2">
-                  {variantForm.variantId ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const matchingProd = products.find((p) => p.id === variantForm.productId);
-                        const vCount = matchingProd?.variants?.length || 1;
-                        const col = rawColors.find((c) => c.id === variantForm.colorId);
-                        const sz = rawSizes.find((s) => s.id === variantForm.sizeId);
+                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-zinc-900 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveModal('NONE');
+                      setModalFeedback(null);
+                    }}
+                    className="px-4 py-2.5 rounded-xl border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-900 transition-colors text-xs font-bold cursor-pointer"
+                  >
+                    Cancel
+                  </button>
 
-                        setVariantToDelete({
-                          variantId: variantForm.variantId,
-                          productId: variantForm.productId,
-                          productName: variantForm.productName,
-                          colorName: col?.name,
-                          colorHex: col?.hexCode,
-                          sizeCode: sz?.code,
-                          price: parseFloat(variantForm.price) || 0,
-                          sellingPrice: variantForm.sellingPrice ? parseFloat(variantForm.sellingPrice) : undefined,
-                          image: variantForm.images[0] || variantForm.productImage,
-                          isOnlyVariant: vCount <= 1,
-                        });
-                      }}
-                      className="px-3.5 py-2.5 rounded-xl bg-red-950/60 hover:bg-red-900 text-red-300 hover:text-white border border-red-800/80 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
-                      title="Delete this variant"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 text-red-400" />
-                      <span>Delete Variant</span>
-                    </button>
-                  ) : <div />}
-
-                  <div className="flex items-center gap-2.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveModal('NONE');
-                        setModalFeedback(null);
-                      }}
-                      className="px-4 py-2.5 rounded-xl border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-900 transition-colors text-xs font-bold cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-
-                    <button
-                      type="submit"
+                  <button
+                    type="submit"
                       disabled={isSubmitting}
                       className="px-5 py-2.5 rounded-xl bg-[#fef08a] text-black font-black text-xs uppercase tracking-wider hover:bg-yellow-300 transition-colors disabled:opacity-50 flex items-center gap-2 cursor-pointer shadow-lg shadow-[#fef08a]/10"
                     >
@@ -4065,7 +4034,6 @@ export default function AdminDashboardPage() {
                       )}
                     </button>
                   </div>
-                </div>
               </form>
             )}
 
@@ -5338,6 +5306,7 @@ export default function AdminDashboardPage() {
         onClose={() => setActiveModal('NONE')}
         products={products}
         token={getAuthToken()}
+        onSaleSaved={loadAdminProducts}
       />
     </div>
   );

@@ -448,6 +448,27 @@ export async function loginUser(input: { email: string; password: string }) {
 }
 
 /**
+ * Exchange a refresh token for a newly issued access token
+ */
+export async function refreshAuthToken(refreshToken: string) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      data: { success: false, message: err.message || 'Network connection failed' },
+    };
+  }
+}
+
+/**
  * Register a new user via Backend API
  */
 export async function registerUser(input: {
@@ -1661,3 +1682,104 @@ export async function updateAdminStoreSettings(
     };
   }
 }
+
+/**
+ * Record an invoice sale in sales_details and decrement product variant stock
+ */
+export async function recordAdminInvoiceSale(
+  token: string,
+  saleData: {
+    invoiceNumber: string;
+    userId?: string | null;
+    customerName: string;
+    customerEmail?: string | null;
+    customerPhone?: string | null;
+    customerAddress?: string | null;
+    paymentMethod?: string;
+    paymentStatus?: string;
+    notes?: string | null;
+    items: {
+      productId?: string | null;
+      variantId?: string | null;
+      productName: string;
+      size?: string | null;
+      color?: string | null;
+      quantity: number;
+      originalPrice: number;
+      sellingPrice: number;
+      discountAmount?: number;
+      totalAmount: number;
+    }[];
+  }
+) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/orders/admin/invoice-sale`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(saleData),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.ok) {
+      clearApiCache();
+    }
+    return { ok: res.ok, status: res.status, data: json };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      data: { success: false, message: err.message || 'Network error while saving invoice sale' },
+    };
+  }
+}
+
+/**
+ * Fetches the next sequential invoice number from the backend (e.g. SF-INV-00001, SF-INV-00002)
+ */
+export async function fetchNextInvoiceNumber(token: string): Promise<string> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/orders/admin/next-invoice-number`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      cache: 'no-store',
+    });
+    if (res.ok) {
+      const json = await res.json();
+      if (json?.data?.nextInvoiceNumber) {
+        return json.data.nextInvoiceNumber;
+      }
+    }
+  } catch (err) {
+    console.warn('Could not fetch next invoice number:', err);
+  }
+  return 'SF-INV-00001';
+}
+
+/**
+ * Resets the invoice sequence in backend so it starts again at SF-INV-00001
+ */
+export async function resetInvoiceCounterApi(token: string): Promise<string> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/orders/admin/reset-invoice-counter`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (res.ok) {
+      const json = await res.json();
+      if (json?.data?.nextInvoiceNumber) {
+        return json.data.nextInvoiceNumber;
+      }
+    }
+  } catch (err) {
+    console.warn('Could not reset invoice counter:', err);
+  }
+  return 'SF-INV-00001';
+}
+
+
