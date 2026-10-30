@@ -131,6 +131,16 @@ export default function ProductGrid({ initialProducts, products: controlledProdu
                   <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                   Out of Stock
                 </div>
+              ) : product.displayType === 2 ? (
+                <div className="absolute top-2 left-2 z-10 bg-orange-500 text-white text-[10px] sm:text-[11px] font-black uppercase tracking-wider px-2 py-0.5 rounded shadow flex items-center gap-1 shadow-orange-500/20">
+                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                  Clearing Stock
+                </div>
+              ) : product.displayType === 1 ? (
+                <div className="absolute top-2 left-2 z-10 bg-[#fef08a] text-black text-[10px] sm:text-[11px] font-black uppercase tracking-wider px-2 py-0.5 rounded shadow flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-black animate-pulse" />
+                  New
+                </div>
               ) : hasDiscount ? (
                 <div className="absolute top-2 left-2 z-10 bg-[#fef08a] text-black text-[10px] sm:text-[11px] font-black uppercase tracking-wider px-2 py-0.5 rounded shadow">
                   {discountPercent}% OFF

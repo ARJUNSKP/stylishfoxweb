@@ -101,6 +101,28 @@ export default function ProductDetailClient({
   // Added to cart feedback state
   const [isAdded, setIsAdded] = useState(false);
 
+  // Main Image Hover Zoom Effect State
+  const [isZoomed, setIsZoomed] = useState(false);
+  const [zoomPosition, setZoomPosition] = useState({ x: 50, y: 50 });
+  const imageContainerRef = React.useRef<HTMLDivElement>(null);
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!imageContainerRef.current) return;
+    const rect = imageContainerRef.current.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    setZoomPosition({
+      x: Math.max(0, Math.min(100, x)),
+      y: Math.max(0, Math.min(100, y)),
+    });
+  };
+
+  const handleMouseEnter = () => setIsZoomed(true);
+  const handleMouseLeave = () => {
+    setIsZoomed(false);
+    setZoomPosition({ x: 50, y: 50 });
+  };
+
   // Filter only published variants for storefront interaction
   const publishedVariants = useMemo(() => {
     if (!product.variants || !Array.isArray(product.variants)) return [];
@@ -276,6 +298,17 @@ export default function ProductDetailClient({
     };
   }, [currentVariant, product.price, product.sellingPrice, product.originalPrice]);
 
+  // Effective displayType for the active variant or product (2 = Clearing Stock, 1 = New Stock, 0 = Normal)
+  const currentDisplayType = useMemo(() => {
+    if (currentVariant?.displayType !== undefined) {
+      return Number(currentVariant.displayType);
+    }
+    if (product.displayType !== undefined) {
+      return Number(product.displayType);
+    }
+    return 0;
+  }, [currentVariant?.displayType, product.displayType]);
+
   const itemTotalAmount = activeUnitPrice * quantity;
   const originalTotalAmount = (strikeUnitPrice || activeUnitPrice) * quantity;
   const savings = Math.max(0, originalTotalAmount - itemTotalAmount);
@@ -427,13 +460,30 @@ export default function ProductDetailClient({
             })}
           </div>
 
-          {/* Large Main Feature Image Display */}
-          <div className="flex-1 relative aspect-[3/4] sm:aspect-[4/5] lg:aspect-[3/4] lg:max-h-[calc(100vh-8rem)] bg-zinc-950 rounded-lg sm:rounded-xl overflow-hidden border border-zinc-800/80 shadow-2xl group">
-            {product.isNew && (
-              <div className="absolute top-4 left-4 z-20 bg-[#fef08a] text-black text-xs font-black uppercase tracking-wider px-3 py-1 shadow-md">
+          {/* Large Main Feature Image Display with Mouse Hover Zoom (Inner Zoom Only) */}
+          <div
+            ref={imageContainerRef}
+            onMouseMove={handleMouseMove}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
+            className="flex-1 relative aspect-[3/4] sm:aspect-[4/5] lg:aspect-[3/4] lg:max-h-[calc(100vh-8rem)] bg-zinc-950 rounded-lg sm:rounded-xl overflow-hidden border border-zinc-800/80 shadow-2xl group cursor-crosshair select-none touch-none"
+            style={{ overscrollBehavior: 'contain' }}
+          >
+            {currentDisplayType === 2 ? (
+              <div className="absolute top-4 left-4 z-20 bg-orange-500 text-white text-xs font-black uppercase tracking-wider px-3 py-1 rounded shadow-lg flex items-center gap-1.5 shadow-orange-500/30 pointer-events-none">
+                <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                Clearing Stock
+              </div>
+            ) : currentDisplayType === 1 ? (
+              <div className="absolute top-4 left-4 z-20 bg-[#fef08a] text-black text-xs font-black uppercase tracking-wider px-3 py-1 rounded shadow-lg flex items-center gap-1.5 pointer-events-none">
+                <span className="w-2 h-2 rounded-full bg-black animate-pulse" />
+                New Stock
+              </div>
+            ) : product.isNew ? (
+              <div className="absolute top-4 left-4 z-20 bg-[#fef08a] text-black text-xs font-black uppercase tracking-wider px-3 py-1 shadow-md pointer-events-none">
                 New In
               </div>
-            )}
+            ) : null}
 
             <div className="absolute top-4 right-4 z-20 flex flex-col gap-2">
               <button
@@ -455,22 +505,32 @@ export default function ProductDetailClient({
               </button>
             </div>
 
-            <Image
-              src={activeImages[activeImageIndex] || activeImages[0]}
-              alt={product?.name ? `${product.name} - ${activeColor?.name || 'Standard'}` : 'Product image'}
-              fill
-              priority
-              unoptimized
-              sizes="(max-width: 1024px) 100vw, 55vw"
-              className="object-cover object-center transition-transform duration-700 group-hover:scale-105"
-              onError={(e) => {
-                (e.currentTarget as HTMLImageElement).src =
-                  'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80';
+            {/* Inner zoomed image container - strictly contained inside parent overflow-hidden */}
+            <div
+              className="absolute inset-0 w-full h-full pointer-events-none will-change-transform"
+              style={{
+                transform: isZoomed ? 'scale(2.2)' : 'scale(1)',
+                transformOrigin: `${zoomPosition.x}% ${zoomPosition.y}%`,
+                transition: isZoomed ? 'transform 0.08s ease-out' : 'transform 0.3s ease-out',
               }}
-            />
+            >
+              <Image
+                src={activeImages[activeImageIndex] || activeImages[0]}
+                alt={product?.name ? `${product.name} - ${activeColor?.name || 'Standard'}` : 'Product image'}
+                fill
+                priority
+                unoptimized
+                sizes="(max-width: 1024px) 100vw, 55vw"
+                className="object-cover object-center pointer-events-none"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src =
+                    'https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=800&q=80';
+                }}
+              />
+            </div>
 
             {/* Bottom Color & View Tag */}
-            <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between pointer-events-none">
+            <div className={`absolute bottom-4 left-4 right-4 flex items-center justify-between pointer-events-none transition-opacity duration-300 ${isZoomed ? 'opacity-0' : 'opacity-100'}`}>
               <span className="bg-black/70 backdrop-blur-md text-[11px] font-semibold text-zinc-300 px-3 py-1 rounded border border-zinc-800">
                 {activeColor.name} • View {activeImageIndex + 1} of {activeImages.length}
               </span>
@@ -493,6 +553,18 @@ export default function ProductDetailClient({
               <span className="text-[11px] sm:text-xs uppercase font-extrabold text-[#fef08a] tracking-widest">
                 Stylish Fox Signature
               </span>
+              {currentDisplayType === 2 && (
+                <span className="px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 border border-orange-500/40 text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse" />
+                  Clearing Stock
+                </span>
+              )}
+              {currentDisplayType === 1 && (
+                <span className="px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/40 text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                  New Stock
+                </span>
+              )}
             </div>
 
             <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-white uppercase tracking-tight leading-tight mb-1 sm:mb-2">

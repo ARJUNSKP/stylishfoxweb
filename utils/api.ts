@@ -216,6 +216,7 @@ export function transformBackendProduct(
     categoryName,
     stock,
     isOutOfStock,
+    displayType: raw.displayType !== undefined ? Number(raw.displayType) : 0,
   };
 }
 
@@ -975,6 +976,7 @@ export async function updateAdminProduct(
     description?: string;
     categoryId?: string;
     features?: string[];
+    displayType?: number;
   }
 ) {
   try {
@@ -1564,6 +1566,7 @@ export interface StoreSettingsData {
   freeShippingThreshold: number;
   shippingFee?: number;
   supportEmail?: string;
+  offerText?: string;
   [key: string]: any;
 }
 
@@ -1606,6 +1609,7 @@ export async function fetchStoreSettings(forceRefresh = false): Promise<StoreSet
       whatsappNumber: '918086388058',
       freeShippingThreshold: 2000,
       shippingFee: 149,
+      offerText: '',
     };
     cachedStoreSettings = fallback;
     return fallback;

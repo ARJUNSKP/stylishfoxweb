@@ -14,6 +14,7 @@ const defaultSettings: StoreSettingsData = {
   whatsappNumber: '918086388058',
   freeShippingThreshold: 2000,
   shippingFee: 149,
+  offerText: '',
 };
 
 const SettingsContext = createContext<SettingsContextType>({
@@ -29,13 +30,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const refreshSettings = useCallback(async () => {
     try {
-      const data = await fetchStoreSettings();
+      const data = await fetchStoreSettings(true);
       if (data && data.whatsappNumber) {
         setSettings({
           ...defaultSettings,
           ...data,
           freeShippingThreshold: Number(data.freeShippingThreshold) || 2000,
           shippingFee: Number(data.shippingFee) || 149,
+          offerText: data.offerText !== undefined ? data.offerText : defaultSettings.offerText,
         });
       }
     } catch (e) {
@@ -57,11 +59,26 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         newSettings.shippingFee !== undefined
           ? Number(newSettings.shippingFee)
           : prev.shippingFee,
+      offerText:
+        newSettings.offerText !== undefined
+          ? newSettings.offerText
+          : prev.offerText,
     }));
   }, []);
 
   useEffect(() => {
     refreshSettings();
+
+    const handleSettingsUpdated = () => {
+      refreshSettings();
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('store_settings_updated', handleSettingsUpdated);
+      return () => {
+        window.removeEventListener('store_settings_updated', handleSettingsUpdated);
+      };
+    }
   }, [refreshSettings]);
 
   return (

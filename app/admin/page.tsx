@@ -87,6 +87,7 @@ export interface VariantRowItem {
   price: number;
   sellingPrice?: number;
   stock: number;
+  displayType: number;
   isOutOfStock: boolean;
   isPublished: boolean;
   image: string;
@@ -104,6 +105,7 @@ interface StagedVariant {
   price: number;
   sellingPrice?: number;
   stock: number;
+  displayType?: number;
   images: string[];
   imageFiles?: File[];
 }
@@ -255,11 +257,10 @@ function SearchableSelect({
                       onChange(opt.value);
                       setIsOpen(false);
                     }}
-                    className={`w-full px-2.5 py-1.5 rounded-lg text-xs text-left flex items-center justify-between gap-2 transition-colors cursor-pointer ${
-                      isSelected
+                    className={`w-full px-2.5 py-1.5 rounded-lg text-xs text-left flex items-center justify-between gap-2 transition-colors cursor-pointer ${isSelected
                         ? 'bg-[#fef08a] text-black font-bold'
                         : 'text-zinc-300 hover:bg-zinc-900 hover:text-white'
-                    }`}
+                      }`}
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       {opt.hexCode && (
@@ -292,7 +293,7 @@ function SearchableSelect({
   );
 }
 
-const emptySubscribe = () => () => {};
+const emptySubscribe = () => () => { };
 
 export default function AdminDashboardPage() {
   const { user, token, isAdmin, logout, openProfileOrAuth } = useProfile();
@@ -320,10 +321,12 @@ export default function AdminDashboardPage() {
     whatsappNumber: string;
     freeShippingThreshold: number | string;
     shippingFee: number | string;
+    offerText: string;
   }>({
     whatsappNumber: '918086388058',
     freeShippingThreshold: 2000,
     shippingFee: 149,
+    offerText: '',
   });
   const [isLoadingSettings, setIsLoadingSettings] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
@@ -412,6 +415,7 @@ export default function AdminDashboardPage() {
     categoryId: string;
     features: string[];
     featureInput: string;
+    displayType: number; // 0 = Normal, 1 = New, 2 = Cleared
     // Part 2: Variant Details
     editingVariantId: string;
     colorId: string;
@@ -431,6 +435,7 @@ export default function AdminDashboardPage() {
     categoryId: '',
     features: [],
     featureInput: '',
+    displayType: 0,
     editingVariantId: '',
     colorId: '',
     sizeId: '',
@@ -457,6 +462,7 @@ export default function AdminDashboardPage() {
     sellingPrice: string;
     stock: string;
     sku: string;
+    displayType: number; // 0 = Normal, 1 = New, 2 = Cleared
     images: string[];
     imageFiles: File[];
     imageInput: string;
@@ -474,6 +480,7 @@ export default function AdminDashboardPage() {
     sellingPrice: '',
     stock: '',
     sku: '',
+    displayType: 0,
     images: [],
     imageFiles: [],
     imageInput: '',
@@ -602,6 +609,7 @@ export default function AdminDashboardPage() {
       categoryId: catId,
       features: Array.isArray(found.features) ? [...found.features] : [],
       featureInput: '',
+      displayType: found.displayType !== undefined ? Number(found.displayType) : 0,
     }));
 
     setModalFeedback({
@@ -618,14 +626,14 @@ export default function AdminDashboardPage() {
     // Revoke any local blob URLs to free memory
     for (const url of productForm.images) {
       if (url?.startsWith('blob:')) {
-        try { URL.revokeObjectURL(url); } catch {}
+        try { URL.revokeObjectURL(url); } catch { }
       }
     }
     for (const v of stagedVariants) {
       if (v.images) {
         for (const url of v.images) {
           if (url?.startsWith('blob:')) {
-            try { URL.revokeObjectURL(url); } catch {}
+            try { URL.revokeObjectURL(url); } catch { }
           }
         }
       }
@@ -638,6 +646,7 @@ export default function AdminDashboardPage() {
       categoryId: '',
       features: [],
       featureInput: '',
+      displayType: 0,
       editingVariantId: '',
       colorId: '',
       sizeId: '',
@@ -675,8 +684,8 @@ export default function AdminDashboardPage() {
       Array.isArray(v?.images) && v.images.length > 0
         ? [...v.images]
         : row.image
-        ? [row.image]
-        : [];
+          ? [row.image]
+          : [];
 
     setVariantForm({
       variantId: v?.id || row.variantId || '',
@@ -691,6 +700,7 @@ export default function AdminDashboardPage() {
       sellingPrice: row.sellingPrice !== undefined && !isNaN(row.sellingPrice) ? String(row.sellingPrice) : '',
       stock: String(row.stock ?? 0),
       sku: row.sku || v?.sku || '',
+      displayType: row.displayType !== undefined ? Number(row.displayType) : (v?.displayType !== undefined ? Number(v.displayType) : 0),
       images: variantImages,
       imageFiles: [],
       imageInput: '',
@@ -736,7 +746,7 @@ export default function AdminDashboardPage() {
     // Local-only blob removal (before saving/uploading)
     try {
       URL.revokeObjectURL(targetUrl);
-    } catch {}
+    } catch { }
     const blobIndex = variantForm.images.slice(0, index).filter((u) => u.startsWith('blob:')).length;
     setVariantForm((prev) => ({
       ...prev,
@@ -846,6 +856,7 @@ export default function AdminDashboardPage() {
       if (variantForm.colorId) varFormData.append('colorId', variantForm.colorId);
       if (variantForm.sizeId) varFormData.append('sizeId', variantForm.sizeId);
       if (variantForm.sku) varFormData.append('sku', variantForm.sku);
+      varFormData.append('displayType', String(variantForm.displayType !== undefined ? Number(variantForm.displayType) : 0));
       varFormData.append('isPublished', String(variantForm.isPublished));
 
       // Append existing permanent URLs (filter out local blob: preview URLs)
@@ -879,7 +890,7 @@ export default function AdminDashboardPage() {
       // Cleanup local blob preview URLs
       for (const img of variantForm.images) {
         if (img?.startsWith('blob:')) {
-          try { URL.revokeObjectURL(img); } catch {}
+          try { URL.revokeObjectURL(img); } catch { }
         }
       }
 
@@ -996,7 +1007,7 @@ export default function AdminDashboardPage() {
     // Local-only blob removal (before saving/uploading)
     try {
       URL.revokeObjectURL(targetUrl);
-    } catch {}
+    } catch { }
     const blobIndex = productForm.images.slice(0, indexToRemove).filter((u) => u.startsWith('blob:')).length;
     setProductForm((prev) => ({
       ...prev,
@@ -1014,7 +1025,7 @@ export default function AdminDashboardPage() {
     if (url.startsWith('blob:')) {
       try {
         URL.revokeObjectURL(url);
-      } catch {}
+      } catch { }
       if (type === 'productForm') {
         const blobIndex = productForm.images.slice(0, index).filter((u) => u.startsWith('blob:')).length;
         setProductForm((prev) => ({
@@ -1235,7 +1246,7 @@ export default function AdminDashboardPage() {
     if (target?.images) {
       for (const img of target.images) {
         if (img?.startsWith('blob:')) {
-          try { URL.revokeObjectURL(img); } catch {}
+          try { URL.revokeObjectURL(img); } catch { }
         }
       }
     }
@@ -1353,6 +1364,7 @@ export default function AdminDashboardPage() {
           description: productForm.description.trim() || undefined,
           features: finalFeatures.length > 0 ? finalFeatures : undefined,
           categoryId: productForm.categoryId || undefined,
+          displayType: productForm.displayType !== undefined ? Number(productForm.displayType) : 0,
         });
 
         // 2. If editing a specific variant, update its details with FormData (uploading image files to R2)
@@ -1370,6 +1382,7 @@ export default function AdminDashboardPage() {
             varFormData.append('sellingPrice', String(parseFloat(productForm.sellingPrice)));
           }
           varFormData.append('stock', String(parseInt(productForm.stock, 10) || 0));
+          varFormData.append('displayType', String(productForm.displayType !== undefined ? Number(productForm.displayType) : 0));
 
           // Append existing permanent URLs (filter out local blob: URLs)
           finalImages
@@ -1394,6 +1407,7 @@ export default function AdminDashboardPage() {
             vFormData.append('price', String(v.price));
             if (v.sellingPrice) vFormData.append('sellingPrice', String(v.sellingPrice));
             vFormData.append('stock', String(v.stock));
+            vFormData.append('displayType', String(v.displayType !== undefined ? Number(v.displayType) : (productForm.displayType !== undefined ? Number(productForm.displayType) : 0)));
             vFormData.append('isPublished', 'false');
 
             // Append existing permanent URLs
@@ -1431,6 +1445,7 @@ export default function AdminDashboardPage() {
       if (productForm.tagline.trim()) prodFormData.append('tagline', productForm.tagline.trim());
       if (productForm.description.trim()) prodFormData.append('description', productForm.description.trim());
       if (productForm.categoryId) prodFormData.append('categoryId', productForm.categoryId);
+      prodFormData.append('displayType', String(productForm.displayType !== undefined ? Number(productForm.displayType) : 0));
       if (finalFeatures.length > 0) {
         prodFormData.append('features', JSON.stringify(finalFeatures));
       }
@@ -1442,6 +1457,7 @@ export default function AdminDashboardPage() {
         price: v.price,
         sellingPrice: v.sellingPrice || undefined,
         stock: v.stock,
+        displayType: v.displayType !== undefined ? Number(v.displayType) : (productForm.displayType !== undefined ? Number(productForm.displayType) : 0),
         images: (v.images || []).filter((img) => !img.startsWith('blob:')),
         isPublished: false,
       }));
@@ -1738,7 +1754,7 @@ export default function AdminDashboardPage() {
       if (removedUrl?.startsWith('blob:')) {
         try {
           URL.revokeObjectURL(removedUrl);
-        } catch {}
+        } catch { }
       }
       const newImages = prev.images.filter((_, idx) => idx !== indexToRemove);
       const newFiles = prev.imageFiles.filter((_, idx) => idx !== indexToRemove);
@@ -1795,7 +1811,7 @@ export default function AdminDashboardPage() {
           if (img.startsWith('blob:')) {
             try {
               URL.revokeObjectURL(img);
-            } catch {}
+            } catch { }
           }
         });
 
@@ -1962,7 +1978,7 @@ export default function AdminDashboardPage() {
       if (res.ok) {
         // If this was the only variant, also clean up the product so catalog doesn't leave orphaned empty product
         if (isOnlyVariant && productId) {
-          await deleteAdminProduct(authToken, productId).catch(() => {});
+          await deleteAdminProduct(authToken, productId).catch(() => { });
         }
 
         setModalFeedback({
@@ -2075,8 +2091,8 @@ export default function AdminDashboardPage() {
             v.sellingPrice !== undefined && v.sellingPrice !== null && !isNaN(parseFloat(v.sellingPrice))
               ? parseFloat(v.sellingPrice)
               : v.selling_price !== undefined && v.selling_price !== null && !isNaN(parseFloat(v.selling_price))
-              ? parseFloat(v.selling_price)
-              : undefined;
+                ? parseFloat(v.selling_price)
+                : undefined;
 
           const vStock =
             typeof v.stock === 'number'
@@ -2087,44 +2103,44 @@ export default function AdminDashboardPage() {
           const vImages = Array.isArray(v.images)
             ? v.images
             : typeof v.images === 'string' && v.images.startsWith('[')
-            ? (() => {
+              ? (() => {
                 try {
                   return JSON.parse(v.images);
                 } catch {
                   return [];
                 }
               })()
-            : v.images
-            ? [v.images]
-            : [];
+              : v.images
+                ? [v.images]
+                : [];
 
           const colImages = Array.isArray(col?.images)
             ? col.images
             : typeof col?.images === 'string' && col.images.startsWith('[')
-            ? (() => {
+              ? (() => {
                 try {
                   return JSON.parse(col.images);
                 } catch {
                   return [];
                 }
               })()
-            : col?.images
-            ? [col.images]
-            : [];
+              : col?.images
+                ? [col.images]
+                : [];
 
           const pImages = Array.isArray(p.images)
             ? p.images
             : typeof (p.images as any) === 'string' && (p.images as any).startsWith('[')
-            ? (() => {
+              ? (() => {
                 try {
                   return JSON.parse(p.images as any);
                 } catch {
                   return [];
                 }
               })()
-            : p.images
-            ? [p.images]
-            : [];
+              : p.images
+                ? [p.images]
+                : [];
 
           const rawImg =
             (vImages.length > 0 && vImages[0]) ||
@@ -2149,13 +2165,14 @@ export default function AdminDashboardPage() {
             price: vPrice,
             sellingPrice: vSellingPrice,
             stock: vStock,
+            displayType: v.displayType !== undefined ? Number(v.displayType) : (p.displayType !== undefined ? Number(p.displayType) : 0),
             isOutOfStock: vStock <= 0,
             isPublished:
               v.isPublished !== undefined
                 ? Boolean(v.isPublished)
                 : v.published !== undefined
-                ? Boolean(v.published)
-                : true,
+                  ? Boolean(v.published)
+                  : true,
             sku: v.sku || '',
             image: vImg,
           });
@@ -2165,16 +2182,16 @@ export default function AdminDashboardPage() {
         const pImages = Array.isArray(p.images)
           ? p.images
           : typeof (p.images as any) === 'string' && (p.images as any).startsWith('[')
-          ? (() => {
+            ? (() => {
               try {
                 return JSON.parse(p.images as any);
               } catch {
                 return [];
               }
             })()
-          : p.images
-          ? [p.images]
-          : [];
+            : p.images
+              ? [p.images]
+              : [];
         const rawImg = (pImages.length > 0 && pImages[0]) || fallbackImg;
 
         list.push({
@@ -2191,6 +2208,7 @@ export default function AdminDashboardPage() {
           price: p.price || 0,
           sellingPrice: p.sellingPrice,
           stock: pStock,
+          displayType: p.displayType !== undefined ? Number(p.displayType) : 0,
           isOutOfStock: pStock <= 0,
           isPublished: true,
           sku: '',
@@ -2461,11 +2479,10 @@ export default function AdminDashboardPage() {
                 <button
                   type="button"
                   onClick={() => setIsMenuOpen((prev) => !prev)}
-                  className={`p-2 rounded-lg border text-zinc-400 hover:text-white transition-all cursor-pointer ${
-                    isMenuOpen
+                  className={`p-2 rounded-lg border text-zinc-400 hover:text-white transition-all cursor-pointer ${isMenuOpen
                       ? 'bg-[#fef08a] text-black border-[#fef08a]'
                       : 'bg-zinc-900 hover:bg-zinc-800 border-zinc-800'
-                  }`}
+                    }`}
                   title="Admin Actions"
                   id="admin-menu-dropdown-button"
                 >
@@ -2566,6 +2583,7 @@ export default function AdminDashboardPage() {
                               whatsappNumber: data.whatsappNumber || '918086388058',
                               freeShippingThreshold: data.freeShippingThreshold !== undefined ? data.freeShippingThreshold : 2000,
                               shippingFee: data.shippingFee !== undefined ? data.shippingFee : 149,
+                              offerText: data.offerText !== undefined ? data.offerText : '',
                             });
                           }
                         } catch (err) {
@@ -2668,9 +2686,24 @@ export default function AdminDashboardPage() {
                               />
                             </div>
                             <div className="flex flex-col min-w-0">
-                              <span className="font-bold text-white uppercase truncate max-w-xs md:max-w-sm group-hover:text-[#fef08a] transition-colors">
-                                {row.name}
-                              </span>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-bold text-white uppercase truncate max-w-xs md:max-w-sm group-hover:text-[#fef08a] transition-colors">
+                                  {row.name}
+                                </span>
+                                {row.displayType === 2 ? (
+                                  <span className="px-1.5 py-0.2 rounded bg-orange-500/20 text-orange-400 border border-orange-500/40 text-[9px] font-black uppercase tracking-wider">
+                                    Clearing Stock
+                                  </span>
+                                ) : row.displayType === 1 ? (
+                                  <span className="px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-300 border border-amber-400/40 text-[9px] font-black uppercase tracking-wider">
+                                    New
+                                  </span>
+                                ) : (
+                                  <span className="px-1.5 py-0.2 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/60 text-[9px] font-medium uppercase tracking-wider">
+                                    Normal
+                                  </span>
+                                )}
+                              </div>
                               <div className="flex items-center gap-2 mt-0.5">
                                 <span className="text-[10px] text-zinc-500 truncate max-w-[140px] sm:max-w-xs">
                                   {row.tagline}
@@ -2905,11 +2938,10 @@ export default function AdminDashboardPage() {
             {/* Feedback Notice */}
             {modalFeedback && (
               <div
-                className={`mb-4 px-3.5 py-2.5 rounded-xl text-xs font-medium flex items-center gap-2 ${
-                  modalFeedback.type === 'success'
+                className={`mb-4 px-3.5 py-2.5 rounded-xl text-xs font-medium flex items-center gap-2 ${modalFeedback.type === 'success'
                     ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
                     : 'bg-red-500/10 border border-red-500/30 text-red-400'
-                }`}
+                  }`}
               >
                 {modalFeedback.type === 'success' ? (
                   <Check className="w-4 h-4 shrink-0" />
@@ -2969,9 +3001,8 @@ export default function AdminDashboardPage() {
                             }));
                           }
                         }}
-                        className={`w-full px-3.5 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#fef08a] ${
-                          productForm.name || productForm.selectedProductId ? 'pr-9' : ''
-                        }`}
+                        className={`w-full px-3.5 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#fef08a] ${productForm.name || productForm.selectedProductId ? 'pr-9' : ''
+                          }`}
                       />
                       {(productForm.name || productForm.selectedProductId) && (
                         <button
@@ -3218,7 +3249,7 @@ export default function AdminDashboardPage() {
                               {Math.round(
                                 ((parseFloat(productForm.price) - parseFloat(productForm.sellingPrice)) /
                                   parseFloat(productForm.price)) *
-                                  100
+                                100
                               )}% OFF
                             </span>
                           )}
@@ -3494,8 +3525,8 @@ export default function AdminDashboardPage() {
                             {productForm.isEditing
                               ? 'Update Product & Variant'
                               : stagedVariants.length === 0
-                              ? 'Add Variant To Save'
-                              : `Save Product (${stagedVariants.length} Variant${stagedVariants.length > 1 ? 's' : ''})`}
+                                ? 'Add Variant To Save'
+                                : `Save Product (${stagedVariants.length} Variant${stagedVariants.length > 1 ? 's' : ''})`}
                           </span>
                         )}
                       </button>
@@ -3574,25 +3605,22 @@ export default function AdminDashboardPage() {
                     <button
                       type="button"
                       onClick={() => setVariantForm((prev) => ({ ...prev, isPublished: true }))}
-                      className={`flex items-center justify-between p-3 rounded-xl border text-left transition-all cursor-pointer ${
-                        variantForm.isPublished
+                      className={`flex items-center justify-between p-3 rounded-xl border text-left transition-all cursor-pointer ${variantForm.isPublished
                           ? 'bg-emerald-500/15 border-emerald-500/80 shadow-[0_0_15px_rgba(16,185,129,0.15)] ring-1 ring-emerald-500/50'
                           : 'bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-300'
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center gap-2.5">
                         <div
-                          className={`p-1.5 rounded-lg ${
-                            variantForm.isPublished ? 'bg-emerald-500 text-black' : 'bg-zinc-800 text-zinc-400'
-                          }`}
+                          className={`p-1.5 rounded-lg ${variantForm.isPublished ? 'bg-emerald-500 text-black' : 'bg-zinc-800 text-zinc-400'
+                            }`}
                         >
                           <Eye className="w-4 h-4" />
                         </div>
                         <div>
                           <div
-                            className={`text-xs font-bold ${
-                              variantForm.isPublished ? 'text-white' : 'text-zinc-300'
-                            }`}
+                            className={`text-xs font-bold ${variantForm.isPublished ? 'text-white' : 'text-zinc-300'
+                              }`}
                           >
                             Published
                           </div>
@@ -3609,25 +3637,22 @@ export default function AdminDashboardPage() {
                     <button
                       type="button"
                       onClick={() => setVariantForm((prev) => ({ ...prev, isPublished: false }))}
-                      className={`flex items-center justify-between p-3 rounded-xl border text-left transition-all cursor-pointer ${
-                        !variantForm.isPublished
+                      className={`flex items-center justify-between p-3 rounded-xl border text-left transition-all cursor-pointer ${!variantForm.isPublished
                           ? 'bg-amber-500/15 border-amber-500/80 shadow-[0_0_15px_rgba(245,158,11,0.15)] ring-1 ring-amber-500/50'
                           : 'bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-300'
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center gap-2.5">
                         <div
-                          className={`p-1.5 rounded-lg ${
-                            !variantForm.isPublished ? 'bg-amber-500 text-black' : 'bg-zinc-800 text-zinc-400'
-                          }`}
+                          className={`p-1.5 rounded-lg ${!variantForm.isPublished ? 'bg-amber-500 text-black' : 'bg-zinc-800 text-zinc-400'
+                            }`}
                         >
                           <Archive className="w-4 h-4" />
                         </div>
                         <div>
                           <div
-                            className={`text-xs font-bold ${
-                              !variantForm.isPublished ? 'text-white' : 'text-zinc-300'
-                            }`}
+                            className={`text-xs font-bold ${!variantForm.isPublished ? 'text-white' : 'text-zinc-300'
+                              }`}
                           >
                             Archived
                           </div>
@@ -3639,6 +3664,61 @@ export default function AdminDashboardPage() {
                       {!variantForm.isPublished && (
                         <span className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_8px_#fbbf24]" />
                       )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Variant Display Classification (Normal 0 / New 1 / Cleared 2) */}
+                <div className="p-3 rounded-xl bg-zinc-900/60 border border-zinc-800/80">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-[11px] font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-2">
+                      <span>Variant Display Tag / Status</span>
+
+                    </label>
+
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setVariantForm((prev) => ({ ...prev, displayType: 0 }))}
+                      className={`py-2 px-3 rounded-xl text-xs font-bold transition-all border flex flex-col items-center justify-center gap-0.5 cursor-pointer ${(variantForm.displayType ?? 0) === 0
+                          ? 'bg-zinc-800 border-zinc-500 text-white shadow-md'
+                          : 'bg-zinc-950/60 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
+                        }`}
+                    >
+                      <span className="font-bold">Normal</span>
+
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setVariantForm((prev) => ({ ...prev, displayType: 1 }))}
+                      className={`py-2 px-3 rounded-xl text-xs font-bold transition-all border flex flex-col items-center justify-center gap-0.5 cursor-pointer ${(variantForm.displayType ?? 0) === 1
+                          ? 'bg-amber-400/15 border-amber-400 text-amber-300 shadow-md shadow-amber-400/10'
+                          : 'bg-zinc-950/60 border-zinc-800 text-zinc-400 hover:border-amber-400/40 hover:text-amber-200'
+                        }`}
+                    >
+                      <span className="font-bold flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                        New
+                      </span>
+
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setVariantForm((prev) => ({ ...prev, displayType: 2 }))}
+                      className={`py-2 px-3 rounded-xl text-xs font-bold transition-all border flex flex-col items-center justify-center gap-0.5 cursor-pointer ${(variantForm.displayType ?? 0) === 2
+                          ? 'bg-orange-500/15 border-orange-500 text-orange-300 shadow-md shadow-orange-500/10'
+                          : 'bg-zinc-950/60 border-zinc-800 text-zinc-400 hover:border-orange-400/40 hover:text-orange-200'
+                        }`}
+                    >
+                      <span className="font-bold flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse" />
+                        Clearing Stock
+                      </span>
+
                     </button>
                   </div>
                 </div>
@@ -3660,11 +3740,10 @@ export default function AdminDashboardPage() {
                       type="button"
                       disabled={isSubmitting}
                       onClick={handleQuickTogglePublish}
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                        variantForm.isPublished
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1.5 ${variantForm.isPublished
                           ? 'bg-amber-500/10 hover:bg-amber-500 text-amber-400 hover:text-black border border-amber-500/30'
                           : 'bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-black border border-emerald-500/30'
-                      }`}
+                        }`}
                     >
                       {variantForm.isPublished ? (
                         <>
@@ -3755,18 +3834,18 @@ export default function AdminDashboardPage() {
                       </label>
                       {Boolean(
                         variantForm.sellingPrice &&
-                          variantForm.price &&
-                          parseFloat(variantForm.sellingPrice) < parseFloat(variantForm.price)
+                        variantForm.price &&
+                        parseFloat(variantForm.sellingPrice) < parseFloat(variantForm.price)
                       ) && (
-                        <span className="text-[10px] font-black text-[#fef08a] bg-[#fef08a]/10 border border-[#fef08a]/30 px-1.5 py-0.2 rounded font-sans tracking-tight">
-                          {Math.round(
-                            ((parseFloat(variantForm.price) - parseFloat(variantForm.sellingPrice)) /
-                              parseFloat(variantForm.price)) *
+                          <span className="text-[10px] font-black text-[#fef08a] bg-[#fef08a]/10 border border-[#fef08a]/30 px-1.5 py-0.2 rounded font-sans tracking-tight">
+                            {Math.round(
+                              ((parseFloat(variantForm.price) - parseFloat(variantForm.sellingPrice)) /
+                                parseFloat(variantForm.price)) *
                               100
-                          )}
-                          % OFF
-                        </span>
-                      )}
+                            )}
+                            % OFF
+                          </span>
+                        )}
                     </div>
                     <div className="relative">
                       <span className="absolute left-3 top-2.5 text-zinc-500 font-mono text-xs">₹</span>
@@ -4337,11 +4416,10 @@ export default function AdminDashboardPage() {
                     rawCarousels.map((c) => (
                       <div
                         key={c.id}
-                        className={`p-3.5 rounded-2xl border transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
-                          c.isActive
+                        className={`p-3.5 rounded-2xl border transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${c.isActive
                             ? 'bg-emerald-950/20 border-emerald-500/50 shadow-lg shadow-emerald-500/5'
                             : 'bg-zinc-900/60 border-zinc-800 hover:border-zinc-700'
-                        }`}
+                          }`}
                       >
                         {/* Left: Info & Thumbnails */}
                         <div className="flex items-center gap-3.5 min-w-0">
@@ -4543,9 +4621,8 @@ export default function AdminDashboardPage() {
                                 key={dotIdx}
                                 type="button"
                                 onClick={() => setPreviewSlideIndex(dotIdx)}
-                                className={`h-1.5 rounded-full transition-all cursor-pointer ${
-                                  dotIdx === previewSlideIndex ? 'w-5 bg-[#fef08a]' : 'w-1.5 bg-white/40'
-                                }`}
+                                className={`h-1.5 rounded-full transition-all cursor-pointer ${dotIdx === previewSlideIndex ? 'w-5 bg-[#fef08a]' : 'w-1.5 bg-white/40'
+                                  }`}
                               />
                             ))}
                           </div>
@@ -4557,11 +4634,10 @@ export default function AdminDashboardPage() {
                             <div
                               key={imgIdx}
                               onClick={() => setPreviewSlideIndex(imgIdx)}
-                              className={`relative w-16 h-12 rounded-lg overflow-hidden border cursor-pointer shrink-0 transition-all ${
-                                imgIdx === previewSlideIndex
+                              className={`relative w-16 h-12 rounded-lg overflow-hidden border cursor-pointer shrink-0 transition-all ${imgIdx === previewSlideIndex
                                   ? 'border-[#fef08a] scale-105 shadow-md shadow-yellow-500/20'
                                   : 'border-zinc-700 opacity-70 hover:opacity-100'
-                              }`}
+                                }`}
                             >
                               <img
                                 src={img}
@@ -4693,12 +4769,13 @@ export default function AdminDashboardPage() {
                           whatsappNumber: cleanWhatsapp,
                           freeShippingThreshold: threshold,
                           shippingFee: fee,
+                          offerText: settingsForm.offerText?.trim(),
                         });
 
                         if (res.ok) {
                           setModalFeedback({
                             type: 'success',
-                            text: 'Store settings successfully saved into database JSON!',
+                            text: 'Store settings successfully saved',
                           });
                           // Dispatch local storage / broadcast if any
                           if (typeof window !== 'undefined') {
@@ -4725,6 +4802,28 @@ export default function AdminDashboardPage() {
                     }}
                     className="flex flex-col gap-5"
                   >
+                    {/* Top Banner Offer Text Field (Optional - Hides banner when empty) */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="block text-xs font-bold uppercase tracking-wider text-zinc-300">
+                          Top Banner Offer Text
+                        </label>
+                      </div>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={settingsForm.offerText}
+                          onChange={(e) =>
+                            setSettingsForm({ ...settingsForm, offerText: e.target.value })
+                          }
+                          placeholder="e.g. offer banner"
+                          className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 focus:border-[#fef08a] focus:outline-none text-white text-xs font-medium transition-colors"
+                        />
+                      </div>
+                      <p className="text-[10px] text-zinc-500 mt-1.5">
+                        Optional announcement. If left blank or cleared, the top banner section will be completely hidden from the website UI.
+                      </p>
+                    </div>
                     {/* WhatsApp Enquiry Number Field */}
                     <div>
                       <label className="block text-xs font-bold uppercase tracking-wider text-zinc-300 mb-2">

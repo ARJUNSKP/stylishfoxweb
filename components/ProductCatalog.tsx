@@ -78,18 +78,40 @@ function sortProducts(items: Product[], sort: string): Product[] {
       ? item.sellingPrice
       : item.price || 0;
 
+  const compareDisplayType = (a: Product, b: Product) => {
+    const dtA = a.displayType !== undefined ? Number(a.displayType) : 0;
+    const dtB = b.displayType !== undefined ? Number(b.displayType) : 0;
+    return dtB - dtA; // 2 (Cleared) first, 1 (New) second, 0 (Normal) third
+  };
+
   switch (sort) {
     case 'PRICE: LOW TO HIGH':
-      return sorted.sort((a, b) => getEffectivePrice(a) - getEffectivePrice(b));
+      return sorted.sort((a, b) => {
+        const dtDiff = compareDisplayType(a, b);
+        if (dtDiff !== 0) return dtDiff;
+        return getEffectivePrice(a) - getEffectivePrice(b);
+      });
     case 'PRICE: HIGH TO LOW':
-      return sorted.sort((a, b) => getEffectivePrice(b) - getEffectivePrice(a));
+      return sorted.sort((a, b) => {
+        const dtDiff = compareDisplayType(a, b);
+        if (dtDiff !== 0) return dtDiff;
+        return getEffectivePrice(b) - getEffectivePrice(a);
+      });
     case 'ASCENDING (A-Z)':
-      return sorted.sort((a, b) => a.name.localeCompare(b.name));
+      return sorted.sort((a, b) => {
+        const dtDiff = compareDisplayType(a, b);
+        if (dtDiff !== 0) return dtDiff;
+        return a.name.localeCompare(b.name);
+      });
     case 'DESCENDING (Z-A)':
-      return sorted.sort((a, b) => b.name.localeCompare(a.name));
+      return sorted.sort((a, b) => {
+        const dtDiff = compareDisplayType(a, b);
+        if (dtDiff !== 0) return dtDiff;
+        return b.name.localeCompare(a.name);
+      });
     case 'POPULARITY':
     default:
-      return sorted;
+      return sorted.sort(compareDisplayType);
   }
 }
 

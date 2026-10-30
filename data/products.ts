@@ -34,6 +34,7 @@ export interface Product {
   categoryName?: string | null;
   stock?: number;
   isOutOfStock?: boolean;
+  displayType?: number; // 0 = normal, 1 = new, 2 = cleared
 }
 
 export const productsData: Product[] = [
