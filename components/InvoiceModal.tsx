@@ -24,6 +24,8 @@ import {
   Loader2,
   Check,
   RotateCcw,
+  Search,
+  ChevronDown,
 } from 'lucide-react';
 import { Product } from '@/data/products';
 import {
@@ -138,6 +140,68 @@ export default function InvoiceModal({
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(
     null
   );
+  // Search & custom dropdown states for User and Product selection
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
+  const userDropdownRef = useRef<HTMLDivElement>(null);
+
+  const [productSearchQuery, setProductSearchQuery] = useState('');
+  const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
+  const productDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (
+        userDropdownRef.current &&
+        !userDropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsUserDropdownOpen(false);
+      }
+      if (
+        productDropdownRef.current &&
+        !productDropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsProductDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+    };
+  }, []);
+
+  // Filtered users based on userSearchQuery
+  const filteredUsers = useMemo(() => {
+    const q = userSearchQuery.trim().toLowerCase();
+    if (!q) return usersList;
+    return usersList.filter((u) => {
+      const name = (u.name || '').toLowerCase();
+      const email = (u.email || '').toLowerCase();
+      const phone = (u.phoneNumber || u.whatsappNumber || '').toLowerCase();
+      return name.includes(q) || email.includes(q) || phone.includes(q);
+    });
+  }, [usersList, userSearchQuery]);
+
+  // Filtered products based on productSearchQuery
+  const filteredProducts = useMemo(() => {
+    const q = productSearchQuery.trim().toLowerCase();
+    if (!q) return products;
+    return products.filter((p) => {
+      const name = (p.name || '').toLowerCase();
+      const id = String(p.id || '').toLowerCase();
+      const categoryStr =
+        typeof p.category === 'string'
+          ? p.category
+          : p.category?.name || p.category?.categoryName || p.categoryName || '';
+      return (
+        name.includes(q) ||
+        id.includes(q) ||
+        categoryStr.toLowerCase().includes(q)
+      );
+    });
+  }, [products, productSearchQuery]);
+
   const [logoDataUrl, setLogoDataUrl] = useState<string>('');
 
   // Pre-load logo as base64 Data URL for PDF & Print embedding
@@ -220,8 +284,13 @@ export default function InvoiceModal({
     setProductSize('');
     setProductColor('');
 
+    setProductSearchQuery('');
+    setIsProductDropdownOpen(false);
+
     if (!keepCustomer) {
       setSelectedUserId('');
+      setUserSearchQuery('');
+      setIsUserDropdownOpen(false);
       setCustomerName('');
       setCustomerEmail('');
       setCustomerPhone('');
@@ -1366,26 +1435,125 @@ export default function InvoiceModal({
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3.5">
-              {/* User Select Dropdown */}
-              <div className="lg:col-span-2">
-                <label className="block text-[11px] font-semibold text-zinc-400 mb-1.5">
-                  Select User from System <span className="text-[#fef08a]">*</span>
-                </label>
-                <select
-                  value={selectedUserId}
-                  onChange={(e) => handleSelectUser(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-[#fef08a] cursor-pointer"
+              {/* User Select Dropdown with Search */}
+              <div className="lg:col-span-2 relative" ref={userDropdownRef}>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[11px] font-semibold text-zinc-400">
+                    Select User from System <span className="text-[#fef08a]">*</span>
+                  </label>
+                  {selectedUserId && (
+                    <button
+                      type="button"
+                      onClick={() => handleSelectUser('')}
+                      className="text-[10px] text-zinc-400 hover:text-rose-400 transition-colors cursor-pointer"
+                    >
+                      Clear Selection
+                    </button>
+                  )}
+                </div>
+
+                {/* Dropdown trigger button */}
+                <button
+                  type="button"
+                  onClick={() => setIsUserDropdownOpen((prev) => !prev)}
+                  className={`w-full bg-zinc-950 border ${
+                    isUserDropdownOpen ? 'border-[#fef08a]' : 'border-zinc-800'
+                  } rounded-xl px-3.5 py-2.5 text-xs text-left flex items-center justify-between transition-colors focus:outline-none`}
                 >
-                  <option value="">-- Choose User (Auto-fills Address &amp; Info) --</option>
-                  {usersList.map((u) => {
-                    const addrCount = Array.isArray(u.address) ? u.address.length : u.address ? 1 : 0;
-                    return (
-                      <option key={u.id} value={u.id}>
-                        {u.name} — {u.email || u.phoneNumber || 'User'} ({addrCount} addr)
-                      </option>
-                    );
-                  })}
-                </select>
+                  <div className="flex items-center gap-2 truncate">
+                    <UserIcon className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                    {selectedUserId ? (
+                      (() => {
+                        const u = usersList.find((usr) => usr.id === selectedUserId);
+                        return u ? (
+                          <span className="text-white font-medium truncate">
+                            {u.name} <span className="text-zinc-500">({u.email || u.phoneNumber || 'User'})</span>
+                          </span>
+                        ) : (
+                          <span className="text-zinc-400">Selected User</span>
+                        );
+                      })()
+                    ) : (
+                      <span className="text-zinc-500">Search or choose a user...</span>
+                    )}
+                  </div>
+                  <ChevronDown
+                    className={`w-4 h-4 text-zinc-500 transition-transform duration-200 shrink-0 ${
+                      isUserDropdownOpen ? 'rotate-180 text-[#fef08a]' : ''
+                    }`}
+                  />
+                </button>
+
+                {/* Dropdown Menu */}
+                {isUserDropdownOpen && (
+                  <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-zinc-900 border border-zinc-700/80 rounded-xl shadow-2xl overflow-hidden backdrop-blur-md">
+                    {/* Search Input Bar */}
+                    <div className="p-2 border-b border-zinc-800 bg-zinc-950/80 flex items-center gap-2">
+                      <Search className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                      <input
+                        type="text"
+                        autoFocus
+                        value={userSearchQuery}
+                        onChange={(e) => setUserSearchQuery(e.target.value)}
+                        placeholder="Search by name, email, or phone..."
+                        className="w-full bg-transparent text-xs text-white placeholder-zinc-500 focus:outline-none"
+                      />
+                      {userSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setUserSearchQuery('')}
+                          className="text-[10px] text-zinc-400 hover:text-white px-1"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Options list */}
+                    <div className="max-h-56 overflow-y-auto divide-y divide-zinc-800/40">
+                      {filteredUsers.length === 0 ? (
+                        <div className="px-3.5 py-4 text-center text-xs text-zinc-500">
+                          No users found matching &quot;{userSearchQuery}&quot;
+                        </div>
+                      ) : (
+                        filteredUsers.map((u) => {
+                          const addrCount = Array.isArray(u.address)
+                            ? u.address.length
+                            : u.address
+                            ? 1
+                            : 0;
+                          const isSelected = u.id === selectedUserId;
+                          return (
+                            <button
+                              key={u.id}
+                              type="button"
+                              onClick={() => {
+                                handleSelectUser(u.id);
+                                setIsUserDropdownOpen(false);
+                              }}
+                              className={`w-full text-left px-3.5 py-2.5 text-xs flex items-center justify-between gap-2 hover:bg-zinc-800/70 transition-colors cursor-pointer ${
+                                isSelected ? 'bg-[#fef08a]/10 text-[#fef08a]' : 'text-zinc-200'
+                              }`}
+                            >
+                              <div className="truncate">
+                                <p className="font-semibold text-white truncate">{u.name}</p>
+                                <p className="text-[11px] text-zinc-400 truncate">
+                                  {u.email || 'No email'} {u.phoneNumber ? `• ${u.phoneNumber}` : ''}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="text-[10px] bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded border border-zinc-700/50">
+                                  {addrCount} addr
+                                </span>
+                                {isSelected && <Check className="w-3.5 h-3.5 text-[#fef08a]" />}
+                              </div>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Customer Name */}
@@ -1475,27 +1643,142 @@ export default function InvoiceModal({
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3.5 items-end">
-              {/* Product Dropdown */}
-              <div className="lg:col-span-4 sm:col-span-2">
-                <label className="block text-[11px] font-semibold text-zinc-400 mb-1.5">
-                  Select Product <span className="text-[#fef08a]">*</span>
-                </label>
-                <select
-                  value={selectedProductId}
-                  onChange={(e) => handleSelectProduct(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-[#fef08a] cursor-pointer"
+              {/* Product Dropdown with Search */}
+              <div className="lg:col-span-4 sm:col-span-2 relative" ref={productDropdownRef}>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[11px] font-semibold text-zinc-400">
+                    Select Product <span className="text-[#fef08a]">*</span>
+                  </label>
+                  {selectedProductId && (
+                    <button
+                      type="button"
+                      onClick={() => handleSelectProduct('')}
+                      className="text-[10px] text-zinc-400 hover:text-rose-400 transition-colors cursor-pointer"
+                    >
+                      Clear Selection
+                    </button>
+                  )}
+                </div>
+
+                {/* Trigger Button */}
+                <button
+                  type="button"
+                  onClick={() => setIsProductDropdownOpen((prev) => !prev)}
+                  className={`w-full bg-zinc-950 border ${
+                    isProductDropdownOpen ? 'border-[#fef08a]' : 'border-zinc-800'
+                  } rounded-xl px-3.5 py-2.5 text-xs text-left flex items-center justify-between transition-colors focus:outline-none`}
                 >
-                  <option value="">-- Choose Product from Catalog --</option>
-                  {products.map((p) => {
-                    const sp = p.sellingPrice || p.price || 1299;
-                    const orig = p.originalPrice || Math.round(sp * 1.4);
-                    return (
-                      <option key={p.id} value={p.id}>
-                        {p.name} (₹{sp} / MRP ₹{orig})
-                      </option>
-                    );
-                  })}
-                </select>
+                  <div className="flex items-center gap-2 truncate">
+                    <ShoppingBag className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                    {selectedProductId ? (
+                      (() => {
+                        const p = products.find((prod) => String(prod.id) === String(selectedProductId));
+                        if (!p) return <span className="text-zinc-400">{productName || 'Selected Product'}</span>;
+                        const sp = p.sellingPrice || p.price || 1299;
+                        return (
+                          <span className="text-white font-medium truncate">
+                            {p.name} <span className="text-[#fef08a] font-bold">₹{sp}</span>
+                          </span>
+                        );
+                      })()
+                    ) : (
+                      <span className="text-zinc-500">Search or choose product...</span>
+                    )}
+                  </div>
+                  <ChevronDown
+                    className={`w-4 h-4 text-zinc-500 transition-transform duration-200 shrink-0 ${
+                      isProductDropdownOpen ? 'rotate-180 text-[#fef08a]' : ''
+                    }`}
+                  />
+                </button>
+
+                {/* Dropdown Menu */}
+                {isProductDropdownOpen && (
+                  <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-zinc-900 border border-zinc-700/80 rounded-xl shadow-2xl overflow-hidden backdrop-blur-md">
+                    {/* Search Input Bar */}
+                    <div className="p-2 border-b border-zinc-800 bg-zinc-950/80 flex items-center gap-2">
+                      <Search className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                      <input
+                        type="text"
+                        autoFocus
+                        value={productSearchQuery}
+                        onChange={(e) => setProductSearchQuery(e.target.value)}
+                        placeholder="Search product by title, category, id..."
+                        className="w-full bg-transparent text-xs text-white placeholder-zinc-500 focus:outline-none"
+                      />
+                      {productSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setProductSearchQuery('')}
+                          className="text-[10px] text-zinc-400 hover:text-white px-1"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Options list */}
+                    <div className="max-h-60 overflow-y-auto divide-y divide-zinc-800/40">
+                      {filteredProducts.length === 0 ? (
+                        <div className="px-3.5 py-4 text-center text-xs text-zinc-500">
+                          No products found matching &quot;{productSearchQuery}&quot;
+                        </div>
+                      ) : (
+                        filteredProducts.map((p) => {
+                          const sp = p.sellingPrice || p.price || 1299;
+                          const orig = p.originalPrice || Math.round(sp * 1.4);
+                          const isSelected = String(p.id) === String(selectedProductId);
+                          const imgUrl = Array.isArray(p.images) && p.images[0] ? p.images[0] : null;
+
+                          return (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => {
+                                handleSelectProduct(String(p.id));
+                                setIsProductDropdownOpen(false);
+                              }}
+                              className={`w-full text-left px-3 py-2.5 text-xs flex items-center justify-between gap-2.5 hover:bg-zinc-800/70 transition-colors cursor-pointer ${
+                                isSelected ? 'bg-[#fef08a]/10 text-[#fef08a]' : 'text-zinc-200'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 truncate">
+                                {imgUrl ? (
+                                  <img
+                                    src={imgUrl}
+                                    alt={p.name}
+                                    className="w-8 h-8 rounded-lg object-cover bg-zinc-800 shrink-0 border border-zinc-700/50"
+                                  />
+                                ) : (
+                                  <div className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center text-zinc-500 shrink-0 border border-zinc-700/50 text-[10px]">
+                                    SF
+                                  </div>
+                                )}
+                                <div className="truncate">
+                                  <p className="font-semibold text-white truncate">{p.name}</p>
+                                  <p className="text-[10px] text-zinc-400 truncate">
+                                    {(typeof p.category === 'string'
+                                      ? p.category
+                                      : p.category?.name || p.categoryName) || 'Product'}{' '}
+                                    {p.colors?.length ? `• ${p.colors.length} col` : ''}{' '}
+                                    {p.sizes?.length ? `• ${p.sizes.join('/')}` : ''}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <div className="text-right">
+                                  <span className="font-bold text-[#fef08a] block text-xs">₹{sp}</span>
+                                  <span className="text-[10px] text-zinc-500 line-through">₹{orig}</span>
+                                </div>
+                                {isSelected && <Check className="w-3.5 h-3.5 text-[#fef08a]" />}
+                              </div>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Original Price / MRP */}
